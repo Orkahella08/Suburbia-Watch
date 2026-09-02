@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-condensed: 'Oswald', 'Archivo Narrow', 'Bebas Neue', sans-serif;
+    --font-serif: 'Newsreader', 'Georgia', serif;
+    --font-mono: 'Space Mono', monospace;
+    --paper-bg: #E8E5DC;
+    --ink-black: #141414;
+    --ink-muted: #57534E;
+    --ink-faint: #857F77;
+    --rule-border: rgba(20, 20, 20, 0.18);
+  }
+  
+  body {
+    font-family: var(--font-sans);
+    background-color: #E8E5DC;
+    color: #141414;
+    overflow-x: hidden;
+  }
+
+  h1, h2, h3, .font-condensed {
+    font-family: var(--font-condensed);
+    letter-spacing: 0.02em;
+  }
+
+  .font-serif-editorial {
+    font-family: var(--font-serif);
+  }
+
+  .font-mono-archive {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Editorial paper subtle grain and borders */
+.editorial-border {
+  border-color: rgba(20, 20, 20, 0.22);
+}
+
+.editorial-border-heavy {
+  border-color: rgba(20, 20, 20, 0.85);
+}
+
+/* Vintage cinema print photographic look */
+.film-photo-treatment {
+  filter: contrast(108%) brightness(96%) saturate(92%);
+  transition: filter 0.25s ease, transform 0.25s ease;
+}
+
+.film-photo-treatment:hover {
+  filter: contrast(114%) brightness(98%) saturate(100%);
+}
+
+/* Custom scrollbar matching ivory paper catalog */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #E8E5DC;
+  border-left: 1px solid rgba(20, 20, 20, 0.15);
+}
+::-webkit-scrollbar-thumb {
+  background: #2B2A27;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #141414;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+

@@ -1,0 +1,6 @@
+{
+  "name": "Suburbia Watch",
+  "description": "A Curated Collection of Cinema — Vintage editorial film archive and independent cinema catalog presented as printed movie posters.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
