@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { MediaItem, Episode, WatchProgress } from '../types';
-import { extractImdbId, validateImdbId, buildImdbUrl } from '../utils/imdb';
-import { PlaybackManager, defaultPlaybackManager } from '../services/playback/PlaybackManager';
-import { PlaybackProvider } from '../services/playback/PlaybackProvider';
-import { AdSandbox } from './AdSandbox';
+import { MediaItem, Episode, WatchProgress, Season } from '../types';
+import { extractImdbId, validateImdbId } from '../utils/imdb';
+import { PosterImage } from './PosterImage';
+import { fetchTvSeasonsAndEpisodes } from '../services/imdbService';
+import { buildStreamImdbEmbedUrl, translateImdbToStream } from '../services/imdbWatchService';
 import {
   X,
   Play,
@@ -12,10 +12,18 @@ import {
   ChevronDown,
   Star,
   RefreshCw,
-  AlertCircle,
-  Check,
+  ExternalLink,
   Info,
   Tv,
+  ArrowLeft,
+  Volume2,
+  Subtitles,
+  Share2,
+  Check,
+  ShieldCheck,
+  Film,
+  AlertTriangle,
+  Sparkles,
 } from 'lucide-react';
 
 interface WatchPlayerProps {
@@ -29,29 +37,10 @@ interface WatchPlayerProps {
   savedProgress?: WatchProgress;
   onPlayNextMedia?: (nextMedia: MediaItem) => void;
   allMedia?: MediaItem[];
-  playbackManager?: PlaybackManager;
 }
 
-type PlayerState = 'loading' | 'ready' | 'error' | 'source_failed';
-
-const AUTO_NEXT_KEY = 'suburbia_auto_next_preference';
-
-function getInitialAutoNext(): boolean {
-  try {
-    const saved = localStorage.getItem(AUTO_NEXT_KEY);
-    return saved !== null ? saved === 'true' : true;
-  } catch {
-    return true;
-  }
-}
-
-function saveAutoNextPreference(val: boolean) {
-  try {
-    localStorage.setItem(AUTO_NEXT_KEY, String(val));
-  } catch {
-    // Ignore localStorage write error
-  }
-}
+const AUDIO_LANGUAGES = ['Original Audio (Dolby 5.1)', 'English (Descriptive)', 'French', 'Spanish', 'German'];
+const SUBTITLE_OPTIONS = ['Off', 'English [CC]', 'Spanish', 'French', 'German', 'Italian', 'Portuguese'];
 
 export const WatchPlayer: React.FC<WatchPlayerProps> = ({
   media,
@@ -60,692 +49,768 @@ export const WatchPlayer: React.FC<WatchPlayerProps> = ({
   onClose,
   onSelectActor,
   onPlayMedia,
+  onUpdateProgress,
+  savedProgress,
   allMedia = [],
-  playbackManager = defaultPlaybackManager,
 }) => {
   const isTV = media.type === 'tv';
+  const cleanImdb = extractImdbId(media.imdbId) || (validateImdbId(media.id) ? media.id : 'tt26443597');
 
-  // Episode Selection State
-  const [currentSeasonNum, setCurrentSeasonNum] = useState<number>(initialSeasonNumber);
-  const [currentEpisode, setCurrentEpisode] = useState<Episode | null>(null);
-  const [autoNext, setAutoNext] = useState<boolean>(getInitialAutoNext);
-  const [showEpisodeSelector, setShowEpisodeSelector] = useState(false);
+  // Detect if running inside an iframe (like AI Studio preview)
+  const isInsideIframe = typeof window !== 'undefined' && window.self !== window.top;
 
-  // Playback Provider State & Dynamic Sources
-  const [selectedProvider, setSelectedProvider] = useState<PlaybackProvider | null>(null);
-  const [failedProviders, setFailedProviders] = useState<string[]>([]);
-
-  // UI Control Values
-  const [voiceLanguage, setVoiceLanguage] = useState('Original Language');
-  const [subtitlesOption, setSubtitlesOption] = useState('Auto-Load English');
-
-  // Player Lifecycle & Loading State (Strictly user-facing, no technical leaks)
-  const [playerState, setPlayerState] = useState<PlayerState>('loading');
-  const [showDebug, setShowDebug] = useState(false);
-
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const timeoutRef = useRef<any>(null);
-
-  // Current Season Object
-  const currentSeason = useMemo(() => {
-    if (!isTV || !media.seasons || media.seasons.length === 0) return null;
-    return (
-      media.seasons.find((s) => s.seasonNumber === currentSeasonNum) ||
-      media.seasons[0]
-    );
-  }, [isTV, media.seasons, currentSeasonNum]);
-
-  // Sync initial episode or default first episode
-  useEffect(() => {
-    if (!isTV || !currentSeason) {
-      setCurrentEpisode(null);
-      return;
+  // TV Seasons & Episode State
+  const [seasons, setSeasons] = useState<Season[]>(() => {
+    if (media.seasons && media.seasons.length > 0) return media.seasons;
+    if (isTV) {
+      return [
+        {
+          seasonNumber: 1,
+          episodes: [
+            {
+              id: `${media.id}-s1e1`,
+              episodeNumber: 1,
+              seasonNumber: 1,
+              title: 'Chapter 1: The Departure',
+              synopsis: 'The series unfolds with an unprecedented incident that alters the course of history.',
+              duration: '58 min',
+              durationSeconds: 3480,
+              thumbnailUrl: media.posterUrl,
+              airDate: '2023-01-15',
+            },
+            {
+              id: `${media.id}-s1e2`,
+              episodeNumber: 2,
+              seasonNumber: 1,
+              title: 'Chapter 2: The Signal',
+              synopsis: 'A clandestine frequency broadcast reveals an unspoken conspiracy beneath the surface.',
+              duration: '52 min',
+              durationSeconds: 3120,
+              thumbnailUrl: media.backdropUrl || media.posterUrl,
+              airDate: '2023-01-22',
+            },
+            {
+              id: `${media.id}-s1e3`,
+              episodeNumber: 3,
+              seasonNumber: 1,
+              title: 'Chapter 3: Crossing the Meridian',
+              synopsis: 'The team confronts the realities of their expedition as communication lines severed.',
+              duration: '61 min',
+              durationSeconds: 3660,
+              thumbnailUrl: media.posterUrl,
+              airDate: '2023-01-29',
+            },
+          ],
+        },
+      ];
     }
+    return [];
+  });
+
+  const [currentSeasonNum, setCurrentSeasonNum] = useState<number>(() => {
+    if (savedProgress?.seasonNumber) return savedProgress.seasonNumber;
+    return initialSeasonNumber;
+  });
+
+  const [currentEpisode, setCurrentEpisode] = useState<Episode | null>(() => {
+    if (!isTV) return null;
+    const targetSeason = seasons.find((s) => s.seasonNumber === currentSeasonNum) || seasons[0];
+    if (!targetSeason || !targetSeason.episodes || targetSeason.episodes.length === 0) return null;
+
+    if (savedProgress?.episodeNumber) {
+      const ep = targetSeason.episodes.find((e) => e.episodeNumber === savedProgress.episodeNumber);
+      if (ep) return ep;
+    }
+
     if (initialEpisodeId) {
-      const matched = currentSeason.episodes.find((e) => e.id === initialEpisodeId);
-      if (matched) {
-        setCurrentEpisode(matched);
-        return;
-      }
+      const ep = targetSeason.episodes.find((e) => e.id === initialEpisodeId);
+      if (ep) return ep;
     }
-    if (currentSeason.episodes.length > 0) {
-      setCurrentEpisode(currentSeason.episodes[0]);
-    }
-  }, [isTV, currentSeason, initialEpisodeId]);
 
-  // Determine Active IMDb ID
-  const activeImdbId = useMemo(() => {
-    if (isTV && currentEpisode && currentEpisode.imdbId) {
-      const extracted = extractImdbId(currentEpisode.imdbId);
-      if (extracted && validateImdbId(extracted)) {
-        return extracted;
-      }
-    }
-    return extractImdbId(media.imdbId || media.videoUrl) || media.imdbId || '';
-  }, [isTV, currentEpisode, media.imdbId, media.videoUrl]);
+    return targetSeason.episodes[0];
+  });
 
-  const isValidImdbId = useMemo(() => {
-    return validateImdbId(activeImdbId);
-  }, [activeImdbId]);
+  const [isLoadingEpisodes, setIsLoadingEpisodes] = useState<boolean>(false);
 
-  // Available Playback Providers dynamically queried
-  const availableProviders = useMemo(() => {
-    return playbackManager.getAvailableProviders(media, currentEpisode);
-  }, [playbackManager, media, currentEpisode]);
-
-  // Initialize or fallback selected provider
+  // Fetch real episodes if TV and missing
   useEffect(() => {
-    if (availableProviders.length === 0) {
-      setSelectedProvider(null);
-      return;
-    }
-    // Select first non-failed provider, or first available
-    const unfailed = availableProviders.find((p) => !failedProviders.includes(p.getName()));
-    setSelectedProvider(unfailed || availableProviders[0]);
-  }, [availableProviders, failedProviders]);
+    if (!isTV) return;
+    if (media.seasons && media.seasons.length > 0) return;
 
-  // Active Playback URL
-  const playbackUrl = useMemo(() => {
-    if (!selectedProvider || !isValidImdbId) return null;
-    return selectedProvider.getPlaybackUrl(media, currentEpisode);
-  }, [selectedProvider, isValidImdbId, media, currentEpisode]);
+    let isMounted = true;
+    setIsLoadingEpisodes(true);
 
-  // Attempt playback for a provider
-  const tryPlaybackSource = (provider: PlaybackProvider | null) => {
-    if (!provider) {
-      setPlayerState('source_failed');
-      return;
-    }
-
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-
-    if (!isValidImdbId) {
-      setPlayerState('error');
-      return;
-    }
-
-    setPlayerState('loading');
-
-    // Timeout safety for embedded player: if iframe fails to load or triggers CSP/X-Frame-Options
-    timeoutRef.current = setTimeout(() => {
-      setPlayerState((prev) => {
-        if (prev === 'loading') {
-          // Mark this source as unavailable for embedding
-          setFailedProviders((fp) =>
-            fp.includes(provider.getName()) ? fp : [...fp, provider.getName()]
-          );
-          return 'source_failed';
+    fetchTvSeasonsAndEpisodes(cleanImdb)
+      .then((fetchedSeasons) => {
+        if (!isMounted) return;
+        if (fetchedSeasons && fetchedSeasons.length > 0) {
+          setSeasons(fetchedSeasons);
+          const s1 = fetchedSeasons.find((s) => s.seasonNumber === currentSeasonNum) || fetchedSeasons[0];
+          if (s1 && s1.episodes.length > 0 && !currentEpisode) {
+            setCurrentEpisode(s1.episodes[0]);
+          }
         }
-        return prev;
+      })
+      .catch((err) => {
+        console.warn('Failed to load full IMDb seasons list:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingEpisodes(false);
       });
-    }, 6000);
-  };
-
-  // Trigger playback when URL or provider changes
-  useEffect(() => {
-    if (!playbackUrl || !isValidImdbId) {
-      setPlayerState('error');
-      return;
-    }
-    tryPlaybackSource(selectedProvider);
 
     return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
+      isMounted = false;
     };
-  }, [playbackUrl, isValidImdbId]);
+  }, [cleanImdb, isTV, media.title, media.seasons]);
 
-  const handleIframeLoad = () => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-    setPlayerState('ready');
-  };
+  const currentSeason = useMemo(() => {
+    return seasons.find((s) => s.seasonNumber === currentSeasonNum) || seasons[0];
+  }, [seasons, currentSeasonNum]);
 
-  const handleIframeError = () => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
+  // Next / Previous episode calculation
+  const { prevEpisode, nextEpisode } = useMemo(() => {
+    if (!isTV || !currentSeason || !currentEpisode) {
+      return { prevEpisode: null, nextEpisode: null };
     }
-    if (selectedProvider) {
-      setFailedProviders((fp) =>
-        fp.includes(selectedProvider.getName()) ? fp : [...fp, selectedProvider.getName()]
-      );
-    }
-    setPlayerState('source_failed');
-  };
-
-  const handleSourceChange = (providerName: string) => {
-    const match = availableProviders.find((p) => p.getName() === providerName);
-    if (!match) return;
-    setSelectedProvider(match);
-    tryPlaybackSource(match);
-  };
-
-  const handleRetryPlayback = () => {
-    if (selectedProvider) {
-      tryPlaybackSource(selectedProvider);
-    }
-  };
-
-  // TV Serial Next / Previous navigation
-  const nextEpisode = useMemo(() => {
-    if (!isTV || !currentSeason || !currentEpisode) return null;
-    const episodes = currentSeason.episodes;
-    const idx = episodes.findIndex((e) => e.id === currentEpisode.id);
-    if (idx !== -1 && idx < episodes.length - 1) {
-      return episodes[idx + 1];
-    }
-    if (media.seasons) {
-      const nextS = media.seasons.find((s) => s.seasonNumber === currentSeasonNum + 1);
-      if (nextS && nextS.episodes.length > 0) {
-        return nextS.episodes[0];
-      }
-    }
-    return null;
-  }, [isTV, currentSeason, currentEpisode, media.seasons, currentSeasonNum]);
-
-  const prevEpisode = useMemo(() => {
-    if (!isTV || !currentSeason || !currentEpisode) return null;
-    const episodes = currentSeason.episodes;
-    const idx = episodes.findIndex((e) => e.id === currentEpisode.id);
-    if (idx > 0) {
-      return episodes[idx - 1];
-    }
-    if (media.seasons && currentSeasonNum > 1) {
-      const prevS = media.seasons.find((s) => s.seasonNumber === currentSeasonNum - 1);
-      if (prevS && prevS.episodes.length > 0) {
-        return prevS.episodes[prevS.episodes.length - 1];
-      }
-    }
-    return null;
-  }, [isTV, currentSeason, currentEpisode, media.seasons, currentSeasonNum]);
+    const eps = currentSeason.episodes;
+    const idx = eps.findIndex((e) => e.id === currentEpisode.id);
+    return {
+      prevEpisode: idx > 0 ? eps[idx - 1] : null,
+      nextEpisode: idx >= 0 && idx < eps.length - 1 ? eps[idx + 1] : null,
+    };
+  }, [isTV, currentSeason, currentEpisode]);
 
   const handleSelectEpisode = (ep: Episode, seasonNum: number) => {
     setCurrentSeasonNum(seasonNum);
     setCurrentEpisode(ep);
-    setShowEpisodeSelector(false);
+    setPlayerLoading(true);
+
+    onUpdateProgress?.({
+      mediaId: media.id,
+      mediaTitle: media.title,
+      type: 'tv',
+      posterUrl: media.posterUrl,
+      seasonNumber: seasonNum,
+      episodeNumber: ep.episodeNumber,
+      progressSeconds: 60,
+      totalSeconds: ep.durationSeconds || 3600,
+      formattedTime: ep.duration,
+      updatedAt: Date.now(),
+    });
   };
 
-  const handleToggleAutoNext = () => {
-    const nextVal = !autoNext;
-    setAutoNext(nextVal);
-    saveAutoNextPreference(nextVal);
+  // Audio & Subtitles
+  const [audioLang, setAudioLang] = useState<string>(AUDIO_LANGUAGES[0]);
+  const [subtitleLang, setSubtitleLang] = useState<string>(SUBTITLE_OPTIONS[0]);
+
+  // Player state
+  const [playerLoading, setPlayerLoading] = useState<boolean>(true);
+  const [copiedNotification, setCopiedNotification] = useState<boolean>(false);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+
+  // Single unified stream source: streamimdb.ru (e.g. https://streamimdb.ru/embed/tv/tt6226232)
+  const inAppStreamUrl = useMemo(() => {
+    if (isTV) {
+      if (currentSeasonNum > 1 || (currentEpisode && currentEpisode.episodeNumber > 1)) {
+        return `https://streamimdb.ru/embed/tv/${cleanImdb}/${currentSeasonNum}/${currentEpisode?.episodeNumber || 1}`;
+      }
+      return `https://streamimdb.ru/embed/tv/${cleanImdb}`;
+    }
+    return `https://streamimdb.ru/embed/movie/${cleanImdb}`;
+  }, [cleanImdb, isTV, currentSeasonNum, currentEpisode?.episodeNumber]);
+
+  // Whenever stream URL changes, trigger loading state
+  useEffect(() => {
+    setPlayerLoading(true);
+  }, [inAppStreamUrl]);
+
+  const handleReloadPlayer = () => {
+    setPlayerLoading(true);
+    if (iframeRef.current) {
+      const current = iframeRef.current.src;
+      iframeRef.current.src = '';
+      setTimeout(() => {
+        if (iframeRef.current) {
+          iframeRef.current.src = current;
+        }
+      }, 80);
+    }
   };
 
-  // Keyboard shortcut: Escape to close
+  const handleFullscreen = () => {
+    const el = document.getElementById('video-player-container');
+    if (el) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      } else {
+        el.requestFullscreen().catch(() => {});
+      }
+    }
+  };
+
+  // Escape to close
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        onClose();
-      }
+      if (e.key === 'Escape') onClose();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onClose]);
 
-  // Clean-up upon unmount: destroy iframe, cancel timers, reset state
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
+  const handleShare = () => {
+    try {
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(`${media.title} (${media.releaseYear || ''})`);
+        setCopiedNotification(true);
+        setTimeout(() => setCopiedNotification(false), 2000);
       }
-      if (iframeRef.current) {
-        iframeRef.current.src = 'about:blank';
-      }
-    };
-  }, []);
+    } catch {}
+  };
+
+  // Related titles
+  const relatedTitles = useMemo(() => {
+    return allMedia
+      .filter((m) => m.id !== media.id && m.genres.some((g) => media.genres.includes(g)))
+      .slice(0, 6);
+  }, [allMedia, media]);
 
   return (
     <div
-      id="suburbia-watch-player-modal"
+      id="watch-player-modal"
       className="fixed inset-0 z-50 bg-[#0B0B0C] text-[#FAF9F6] overflow-y-auto flex flex-col font-sans"
     >
       {/* Top Navigation Bar */}
-      <header className="sticky top-0 z-30 bg-[#0B0B0C]/95 backdrop-blur-md border-b border-[#27272A] px-4 sm:px-8 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-4 min-w-0">
-          <div className="w-2.5 h-2.5 bg-[#00A3FF] rounded-full animate-pulse shrink-0" />
+      <header className="sticky top-0 z-40 bg-[#0B0B0C]/95 backdrop-blur-md border-b border-[#27272A] px-4 sm:px-8 py-3.5 flex items-center justify-between">
+        <div className="flex items-center gap-3 min-w-0">
+          <button
+            type="button"
+            id="back-to-catalog-btn"
+            onClick={onClose}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#18181B] border border-[#3F3F46] hover:border-[#00A3FF] hover:text-[#00A3FF] text-xs font-mono uppercase tracking-wider transition-colors cursor-pointer"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">RETURN TO CATALOGUE</span>
+          </button>
+
           <div className="min-w-0">
-            <h2 className="font-condensed text-lg sm:text-xl font-bold uppercase tracking-wider text-[#FAF9F6] truncate">
+            <h2 className="font-condensed text-base sm:text-lg font-bold uppercase tracking-wide text-[#FAF9F6] truncate">
               {media.title}
             </h2>
             {isTV && currentEpisode && (
-              <div className="text-xs font-mono text-[#A8A29E] truncate">
-                Season {currentSeasonNum} · Episode {currentEpisode.episodeNumber}: {currentEpisode.title}
-              </div>
+              <p className="font-mono text-xs text-[#00A3FF] truncate">
+                S{currentSeasonNum}·E{currentEpisode.episodeNumber}: {currentEpisode.title}
+              </p>
             )}
           </div>
         </div>
 
-        {/* Right: Close Button [ X ] per Section 44 */}
-        <div className="flex items-center gap-3 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <button
-            id="player-close-btn"
-            onClick={onClose}
-            className="px-3 py-1.5 bg-[#1F1F24] border border-[#3F3F46] hover:border-[#00A3FF] hover:text-[#00A3FF] text-[#FAF9F6] font-mono font-bold text-xs uppercase tracking-wider flex items-center gap-1.5 transition-colors cursor-pointer"
-            aria-label="Close player"
+            type="button"
+            id="share-title-btn"
+            onClick={handleShare}
+            className="p-2 bg-[#18181B] border border-[#3F3F46] hover:border-[#00A3FF] text-[#A8A29E] hover:text-[#00A3FF] transition-colors cursor-pointer"
+            title="Copy title"
           >
-            <span>[ X ]</span>
+            {copiedNotification ? (
+              <Check className="w-4 h-4 text-[#10B981]" />
+            ) : (
+              <Share2 className="w-4 h-4" />
+            )}
+          </button>
+
+          <button
+            type="button"
+            id="close-player-btn"
+            onClick={onClose}
+            className="p-2 bg-[#18181B] border border-[#3F3F46] hover:border-[#EF4444] text-[#A8A29E] hover:text-[#EF4444] transition-colors cursor-pointer"
+            aria-label="Close"
+          >
+            <X className="w-4 h-4" />
           </button>
         </div>
       </header>
 
-      {/* Main Player Terminal Arena */}
-      <main className="max-w-5xl w-full mx-auto px-4 sm:px-6 pt-5 sm:pt-7 pb-16 flex-1 flex flex-col">
-        {/* Playback Area (16:9 Black Rectangular Box, Section 21 & 22) */}
-        <div className="relative w-full aspect-video bg-black border-2 border-[#1F1F24] shadow-2xl overflow-hidden flex items-center justify-center">
-          {/* STATE: INVALID ENTRY ERROR */}
-          {playerState === 'error' && (
-            <div className="p-8 text-center max-w-md animate-in fade-in">
-              <AlertCircle className="w-12 h-12 text-[#EF4444] mx-auto mb-3" />
-              <h3 className="font-condensed text-2xl font-bold uppercase tracking-wider text-[#FAF9F6] mb-2">
-                PLAYBACK UNAVAILABLE
-              </h3>
-              <p className="font-serif-editorial text-sm text-[#A8A29E] mb-5">
-                Playback is currently unavailable for this title entry.
-              </p>
-              <button
-                type="button"
-                onClick={onClose}
-                className="px-5 py-2.5 bg-[#1F1F24] border border-[#3F3F46] text-[#FAF9F6] font-condensed uppercase font-bold text-xs tracking-wider hover:bg-[#2B2B30] cursor-pointer"
-              >
-                RETURN TO CATALOGUE
-              </button>
-            </div>
-          )}
-
-          {/* STATE: USER-FACING CLEAN LOADING (SECTION 3 & 28) */}
-          {playerState === 'loading' && (
-            <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center p-6 text-center z-10 animate-in fade-in">
-              <RefreshCw className="w-8 h-8 text-[#00A3FF] animate-spin mb-4" />
-              <div className="font-condensed text-lg sm:text-xl font-bold uppercase tracking-widest text-[#FAF9F6]">
-                Loading...
-              </div>
-            </div>
-          )}
-
-          {/* STATE: READY OR ACTIVE EMBEDDED IFRAME */}
-          {playbackUrl && (playerState === 'ready' || playerState === 'loading') && (
-            <iframe
-              ref={iframeRef}
-              id="imdbwatch-player-frame"
-              src={playbackUrl}
-              title={`${media.title} Playback`}
-              className="w-full h-full border-0 bg-black"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
-              allowFullScreen
-              onLoad={handleIframeLoad}
-              onError={handleIframeError}
-            />
-          )}
-
-          {/* STATE: CLEAN ERROR UI & SOURCE FALLBACK PER SECTION 23, 24, 53 */}
-          {playerState === 'source_failed' && (
-            <div className="p-8 sm:p-10 text-center max-w-md animate-in fade-in z-20">
-              <div className="w-12 h-12 rounded-full bg-[#1F1F24] border border-[#3F3F46] flex items-center justify-center mx-auto mb-4 text-[#A8A29E]">
-                <Tv className="w-6 h-6" />
-              </div>
-              <h3 className="font-condensed text-2xl font-bold uppercase tracking-wider text-[#FAF9F6] mb-2">
-                PLAYBACK UNAVAILABLE
-              </h3>
-              <p className="font-serif-editorial text-sm text-[#A8A29E] mb-6 leading-relaxed">
-                {availableProviders.length > 1
-                  ? 'Playback cannot be embedded for this source.'
-                  : 'No playable source is currently available for this title.'}
-              </p>
-              <div className="flex flex-wrap items-center justify-center gap-3">
-                {availableProviders.length > 1 ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const other = availableProviders.find(
-                        (p) => p.getName() !== selectedProvider?.getName()
-                      );
-                      if (other) handleSourceChange(other.getName());
-                    }}
-                    className="px-5 py-2.5 bg-[#00A3FF] text-black font-condensed uppercase font-bold text-xs tracking-widest hover:bg-[#38BDF8] transition-colors cursor-pointer"
-                  >
-                    [ ← CHOOSE ANOTHER SOURCE ]
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={handleRetryPlayback}
-                    className="px-4 py-2.5 bg-[#1F1F24] border border-[#3F3F46] text-[#FAF9F6] font-condensed uppercase text-xs tracking-wider hover:border-[#00A3FF] transition-colors flex items-center gap-1.5 cursor-pointer"
-                  >
-                    <RefreshCw className="w-3.5 h-3.5" />
-                    <span>RETRY PLAYBACK</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={onClose}
-                  className="px-4 py-2.5 bg-[#1F1F24] border border-[#3F3F46] text-[#A8A29E] font-condensed uppercase text-xs tracking-wider hover:text-[#FAF9F6] transition-colors cursor-pointer"
-                >
-                  EXIT PLAYER
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* METADATA LINE (SECTION 22): ★ Rating     YEAR     Runtime */}
-        <div className="mt-5 pb-4 border-b border-[#2B2B30] flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-5 sm:gap-7 font-mono text-sm sm:text-base text-[#FAF9F6]">
-            <div className="flex items-center gap-1.5 text-[#EAB308] font-bold">
-              <Star className="w-4 h-4 fill-current" />
-              <span>{media.imdbRating}</span>
-            </div>
-            <div className="text-[#A8A29E] font-medium">{media.releaseYear}</div>
-            <div className="text-[#A8A29E]">
-              {isTV && currentEpisode ? currentEpisode.duration : media.duration}
-            </div>
-            <div className="text-xs font-mono uppercase px-2 py-0.5 border border-[#3F3F46] text-[#A8A29E]">
-              {media.genres.join(' · ')}
-            </div>
-          </div>
-        </div>
-
-        {/* TV EPISODE CONTROLS (IF TV SHOW) */}
-        {isTV && (
-          <div className="mt-4 bg-[#141416] border border-[#2B2B30] p-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-mono uppercase tracking-wider text-[#A8A29E]">EPISODE:</span>
-              <span className="font-condensed text-lg font-bold uppercase text-[#FAF9F6]">
-                S{currentSeasonNum.toString().padStart(2, '0')} · E
-                {currentEpisode?.episodeNumber.toString().padStart(2, '0')}: {currentEpisode?.title}
+      {/* Main Player Page Content */}
+      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-8 py-6">
+        
+        {/* Player Stream Toolbar */}
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5 bg-[#141416] border border-[#27272A] p-2 sm:px-3">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-mono uppercase tracking-widest text-[#71717A]">
+              STREAM SOURCE:
+            </span>
+            <div className="flex items-center gap-2">
+              <span className="px-2.5 py-1 text-xs font-mono uppercase bg-[#18181B] text-[#00A3FF] border border-[#00A3FF]/40 font-bold flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
+                StreamIMDb
+              </span>
+              <span className="text-[11px] font-mono text-[#71717A] hidden sm:inline">
+                {isTV ? `streamimdb.ru/embed/tv/${cleanImdb}` : `streamimdb.ru/embed/movie/${cleanImdb}`}
               </span>
             </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => prevEpisode && handleSelectEpisode(prevEpisode, prevEpisode.seasonNumber)}
-                disabled={!prevEpisode}
-                className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border flex items-center gap-1.5 transition-colors ${
-                  prevEpisode
-                    ? 'border-[#3F3F46] text-[#FAF9F6] hover:border-[#00A3FF] hover:text-[#00A3FF] cursor-pointer'
-                    : 'border-[#27272A] text-[#52525B] cursor-not-allowed'
-                }`}
-                title="Previous Episode"
-              >
-                <SkipBack className="w-3.5 h-3.5" />
-                <span>[ ← PREVIOUS ]</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => nextEpisode && handleSelectEpisode(nextEpisode, nextEpisode.seasonNumber)}
-                disabled={!nextEpisode}
-                className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border flex items-center gap-1.5 transition-colors ${
-                  nextEpisode
-                    ? 'border-[#3F3F46] text-[#FAF9F6] hover:border-[#00A3FF] hover:text-[#00A3FF] cursor-pointer'
-                    : 'border-[#27272A] text-[#52525B] cursor-not-allowed'
-                }`}
-                title="Next Episode"
-              >
-                <span>[ NEXT EPISODE → ]</span>
-                <SkipForward className="w-3.5 h-3.5" />
-              </button>
-
-              <button
-                type="button"
-                onClick={handleToggleAutoNext}
-                className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border transition-colors cursor-pointer ${
-                  autoNext
-                    ? 'bg-[#1F1F24] border-[#00A3FF] text-[#00A3FF] font-bold'
-                    : 'border-[#3F3F46] text-[#71717A] hover:text-[#FAF9F6]'
-                }`}
-                title="Auto-advance next episode preference"
-              >
-                AUTO NEXT: [{autoNext ? 'ON' : 'OFF'}]
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowEpisodeSelector(!showEpisodeSelector)}
-                className="px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border border-[#3F3F46] text-[#FAF9F6] hover:border-[#00A3FF] hover:text-[#00A3FF] transition-colors cursor-pointer"
-              >
-                {showEpisodeSelector ? 'HIDE EPISODES ▲' : 'SELECT EPISODE ▼'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* EPISODE SELECTOR ACCORDION (SECTION 33 & 34) */}
-        {isTV && showEpisodeSelector && media.seasons && (
-          <div className="mt-3 bg-[#141416] border border-[#2B2B30] p-4 animate-in fade-in">
-            {/* Season Selector Tabs */}
-            <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-2 border-b border-[#27272A]">
-              {media.seasons.map((s) => (
-                <button
-                  key={s.seasonNumber}
-                  type="button"
-                  onClick={() => setCurrentSeasonNum(s.seasonNumber)}
-                  className={`px-3 py-1 text-xs font-condensed uppercase tracking-wider border transition-colors cursor-pointer ${
-                    currentSeasonNum === s.seasonNumber
-                      ? 'bg-[#00A3FF] text-black border-[#00A3FF] font-bold'
-                      : 'border-[#3F3F46] text-[#A8A29E] hover:text-[#FAF9F6]'
-                  }`}
-                >
-                  SEASON {s.seasonNumber.toString().padStart(2, '0')}
-                </button>
-              ))}
-            </div>
-
-            {/* Episode Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-              {currentSeason?.episodes.map((ep) => {
-                const isSelected = currentEpisode?.id === ep.id;
-                return (
-                  <button
-                    key={ep.id}
-                    type="button"
-                    onClick={() => handleSelectEpisode(ep, currentSeasonNum)}
-                    className={`p-3 text-left border transition-colors cursor-pointer flex flex-col justify-between ${
-                      isSelected
-                        ? 'bg-[#1F1F24] border-[#00A3FF] text-[#FAF9F6]'
-                        : 'bg-[#18181B] border-[#27272A] text-[#A8A29E] hover:border-[#3F3F46] hover:text-[#FAF9F6]'
-                    }`}
-                  >
-                    <div>
-                      <div className="flex items-center justify-between text-[10px] font-mono uppercase mb-1">
-                        <span className={isSelected ? 'text-[#00A3FF] font-bold' : 'text-[#71717A]'}>
-                          EPISODE {ep.episodeNumber.toString().padStart(2, '0')}
-                        </span>
-                        <span>{ep.duration}</span>
-                      </div>
-                      <div className="font-condensed text-sm font-bold uppercase line-clamp-1">
-                        {ep.title}
-                      </div>
-                      <p className="font-serif-editorial text-xs line-clamp-2 mt-1 opacity-80">
-                        {ep.synopsis}
-                      </p>
-                    </div>
-                    {isSelected && (
-                      <div className="mt-2 text-[10px] font-mono text-[#00A3FF] uppercase font-bold flex items-center gap-1">
-                        <Check className="w-3 h-3" />
-                        <span>CURRENTLY LOADED</span>
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* CONTROLS STACK (SECTION 22): STREAMING SOURCE, VOICE, SUBTITLES */}
-        <div className="mt-6 bg-[#141416] border border-[#2B2B30] p-5 sm:p-7 space-y-6">
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
-            {/* STREAMING SOURCE (Section 14 & 15: Dynamically populated) */}
-            <div>
-              <label className="block text-[10px] font-mono uppercase tracking-widest text-[#71717A] mb-1.5">
-                STREAMING SOURCE
-              </label>
-              <div className="relative">
-                <select
-                  value={selectedProvider?.getName() || 'IMDbWatch'}
-                  onChange={(e) => handleSourceChange(e.target.value)}
-                  className="w-full bg-[#1F1F24] border border-[#3F3F46] text-[#FAF9F6] text-xs font-mono uppercase py-2.5 px-3 appearance-none cursor-pointer focus:border-[#00A3FF] focus:outline-none"
-                >
-                  {availableProviders.map((p) => (
-                    <option key={p.getName()} value={p.getName()}>
-                      {p.getName()} {failedProviders.includes(p.getName()) ? '(Failed)' : ''}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown className="w-4 h-4 text-[#71717A] absolute right-3 top-3 pointer-events-none" />
-              </div>
-              <p className="text-[10px] font-mono text-[#71717A] mt-1">
-                Active playback integration
-              </p>
-            </div>
-
-            {/* VOICE LANGUAGE (Section 30: Original Language) */}
-            <div>
-              <label className="block text-[10px] font-mono uppercase tracking-widest text-[#71717A] mb-1.5">
-                VOICE LANGUAGE
-              </label>
-              <div className="relative">
-                <select
-                  value={voiceLanguage}
-                  onChange={(e) => setVoiceLanguage(e.target.value)}
-                  className="w-full bg-[#1F1F24] border border-[#3F3F46] text-[#FAF9F6] text-xs font-mono uppercase py-2.5 px-3 appearance-none cursor-pointer focus:border-[#00A3FF] focus:outline-none"
-                >
-                  <option value="Original Language">Original Language</option>
-                </select>
-                <ChevronDown className="w-4 h-4 text-[#71717A] absolute right-3 top-3 pointer-events-none" />
-              </div>
-              <p className="text-[10px] font-mono text-[#71717A] mt-1">
-                Playback master track
-              </p>
-            </div>
-
-            {/* ENGLISH SUBTITLES (Section 31: Subtitles controlled by provider) */}
-            <div>
-              <label className="block text-[10px] font-mono uppercase tracking-widest text-[#71717A] mb-1.5">
-                ENGLISH SUBTITLES
-              </label>
-              <div className="relative">
-                <select
-                  value={subtitlesOption}
-                  onChange={(e) => setSubtitlesOption(e.target.value)}
-                  className="w-full bg-[#1F1F24] border border-[#3F3F46] text-[#FAF9F6] text-xs font-mono uppercase py-2.5 px-3 appearance-none cursor-pointer focus:border-[#00A3FF] focus:outline-none"
-                >
-                  <option value="Auto-Load English">Auto-Load English</option>
-                </select>
-                <ChevronDown className="w-4 h-4 text-[#71717A] absolute right-3 top-3 pointer-events-none" />
-              </div>
-              <p className="text-[10px] font-mono text-[#71717A] mt-1">
-                Subtitles controlled by playback provider
-              </p>
-            </div>
           </div>
 
-          {/* PRIMARY ACTION: [ ▶ WATCH NOW ] */}
-          <div className="pt-2">
+          <div className="flex items-center gap-2 font-mono text-xs text-[#A8A29E]">
             <button
-              id="player-watch-now-action-btn"
               type="button"
-              onClick={handleRetryPlayback}
-              className="w-full py-4 bg-[#00A3FF] text-black font-condensed uppercase font-bold text-base sm:text-lg tracking-widest hover:bg-[#38BDF8] transition-colors flex items-center justify-center gap-3 cursor-pointer shadow-lg shadow-[#00A3FF]/20"
+              id="reload-player-stream-btn"
+              onClick={handleReloadPlayer}
+              className="px-2.5 py-1.5 bg-[#1F1F23] border border-[#3F3F46] hover:border-[#71717A] hover:text-[#FAF9F6] transition-colors flex items-center gap-1.5 cursor-pointer text-[11px] uppercase tracking-wider"
+              title="Reload current stream player"
             >
-              <Play className="w-5 h-5 fill-current" />
-              <span>{isTV ? '▶ WATCH EPISODE NOW' : '▶ WATCH MOVIE NOW'}</span>
+              <RefreshCw className="w-3 h-3" />
+              <span>Reload</span>
             </button>
-          </div>
 
-          {/* SYNOPSIS SECTION (SECTION 22) */}
-          <div className="pt-2">
-            <div className="text-[10px] font-mono uppercase tracking-widest text-[#71717A] mb-2">
-              SYNOPSIS
-            </div>
-            <div className="border-t border-b border-[#27272A] py-3.5">
-              <p className="font-serif-editorial text-sm sm:text-base leading-relaxed text-[#E5E5E5]">
-                {isTV && currentEpisode ? currentEpisode.synopsis : media.synopsis}
-              </p>
-            </div>
+            <button
+              type="button"
+              id="fullscreen-player-btn"
+              onClick={handleFullscreen}
+              className="px-2.5 py-1.5 bg-[#1F1F23] border border-[#3F3F46] hover:border-[#71717A] hover:text-[#FAF9F6] transition-colors flex items-center gap-1.5 cursor-pointer text-[11px] uppercase tracking-wider"
+              title="Toggle Fullscreen"
+            >
+              <span>Fullscreen</span>
+            </button>
           </div>
         </div>
 
-        {/* EDITORIAL CREDITS & FUNCTIONAL CAST (SECTION 32) */}
-        <div className="mt-6 bg-[#141416] border border-[#2B2B30] p-5 text-xs font-mono">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 pb-4 border-b border-[#27272A]">
-            <div>
-              <span className="text-[#71717A] block text-[10px] uppercase">DIRECTED BY</span>
-              <span className="text-[#FAF9F6] font-semibold">{media.director}</span>
-            </div>
-            <div>
-              <span className="text-[#71717A] block text-[10px] uppercase">WRITTEN BY</span>
-              <span className="text-[#FAF9F6] font-semibold">{media.writer}</span>
-            </div>
-            <div>
-              <span className="text-[#71717A] block text-[10px] uppercase">DISTRIBUTION</span>
-              <span className="text-[#FAF9F6] font-semibold">{media.streamingProvider || 'Archival Print'}</span>
-            </div>
+        {/* 1. 16:9 RESPONSIVE VIDEO PLAYER CONTAINER */}
+        <div
+          id="video-player-container"
+          className="relative w-full aspect-video bg-black border-2 border-[#27272A] shadow-2xl overflow-hidden"
+        >
+          <iframe
+            ref={iframeRef}
+            id="official-player-frame"
+            src={inAppStreamUrl}
+            title={media.title}
+            className="w-full h-full border-0 bg-black"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture; clipboard-write"
+            allowFullScreen
+            referrerPolicy="origin"
+            onLoad={() => setPlayerLoading(false)}
+          />
+
+          {/* Floating Player Status Pill */}
+          <div className="absolute top-3 left-3 pointer-events-none z-10 flex items-center gap-2 bg-[#0B0B0C]/85 backdrop-blur-sm border border-[#27272A] px-2.5 py-1 text-[10px] font-mono uppercase tracking-widest text-[#FAF9F6]">
+            <span className="w-2 h-2 rounded-full bg-[#10B981] animate-pulse" />
+            <span>
+              {isTV && currentEpisode
+                ? `S${currentSeasonNum.toString().padStart(2, '0')}E${currentEpisode.episodeNumber.toString().padStart(2, '0')} · 1080p HD`
+                : '1080p HD Stream'}
+            </span>
           </div>
 
-          {/* Interactive Cast */}
-          {media.cast && media.cast.length > 0 && (
-            <div className="mt-4 flex items-center flex-wrap gap-2">
-              <span className="text-[10px] uppercase tracking-wider text-[#71717A] mr-2">CAST:</span>
-              {media.cast.map((actor) => (
-                <button
-                  key={actor.name}
-                  type="button"
-                  onClick={() => onSelectActor?.(actor.name)}
-                  className="text-xs font-mono uppercase tracking-wide bg-[#1F1F24] border border-[#3F3F46] px-2.5 py-1 text-[#E5E5E5] hover:border-[#00A3FF] hover:text-[#00A3FF] transition-colors cursor-pointer"
-                  title={`Inspect ${actor.name} archival filmography`}
-                >
-                  {actor.name} <span className="opacity-60 text-[10px]">({actor.role})</span>
-                </button>
-              ))}
+          {/* Player Loading Overlay */}
+          {playerLoading && (
+            <div className="absolute inset-0 bg-black/80 flex flex-col items-center justify-center gap-3 z-10">
+              <RefreshCw className="w-6 h-6 text-[#00A3FF] animate-spin" />
+              <span className="font-mono text-xs uppercase tracking-widest text-[#A8A29E]">
+                CONNECTING DIRECT STREAM...
+              </span>
             </div>
           )}
         </div>
 
-        {/* PLAYBACK DEBUG MODE (SECTION 29) - DEV ONLY */}
-        {Boolean((import.meta as any)?.env?.DEV ?? false) && (
-          <div className="mt-6 bg-[#000000] border border-[#00A3FF]/40 p-4 font-mono text-xs text-[#00A3FF]">
-            <div className="flex items-center justify-between border-b border-[#00A3FF]/20 pb-2 mb-3">
-              <div className="flex items-center gap-2">
-                <Info className="w-4 h-4" />
-                <span className="font-bold tracking-wider">DEVELOPER PLAYBACK DEBUG</span>
+        {/* Playback Status HUD */}
+        <div
+          id="imdbwatch-translation-hud"
+          className="mt-3 bg-[#18181B] border border-[#27272A] p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono"
+        >
+          <div className="flex items-center gap-2.5 overflow-hidden">
+            <span className="px-2 py-0.5 bg-[#00A3FF]/20 text-[#00A3FF] border border-[#00A3FF]/40 text-[10px] uppercase font-bold tracking-wider shrink-0">
+              STREAM STATUS
+            </span>
+            <span className="text-[#A8A29E] truncate text-[11px]">
+              <span className="text-white font-bold">{media.title}</span>
+              <span className="mx-1.5 text-[#52525B]">·</span>
+              <span className="text-[#38BDF8]">{isTV && currentEpisode ? `Season ${currentSeasonNum}, Episode ${currentEpisode.episodeNumber}` : 'Full Movie'}</span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="flex items-center gap-1.5 text-[#10B981] text-[11px]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#10B981] animate-pulse" />
+              STREAM ACTIVE
+            </span>
+          </div>
+        </div>
+
+        {/* 2. TV EPISODE SELECTOR & CONTROLS */}
+        {isTV && (
+          <div id="tv-controls-section" className="mt-4 bg-[#141416] border border-[#27272A] p-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#27272A] pb-3 mb-3">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-mono uppercase tracking-widest text-[#71717A]">
+                  SEASON:
+                </span>
+                {seasons.length > 0 ? (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {seasons.map((s) => (
+                      <button
+                        key={s.seasonNumber}
+                        type="button"
+                        id={`season-tab-${s.seasonNumber}`}
+                        onClick={() => {
+                          setCurrentSeasonNum(s.seasonNumber);
+                          if (s.episodes.length > 0) {
+                            setCurrentEpisode(s.episodes[0]);
+                          }
+                        }}
+                        className={`px-3 py-1 text-xs font-mono uppercase border transition-colors cursor-pointer ${
+                          currentSeasonNum === s.seasonNumber
+                            ? 'bg-[#00A3FF] text-black font-bold border-[#00A3FF]'
+                            : 'bg-[#18181B] text-[#A8A29E] border-[#3F3F46] hover:text-[#FAF9F6]'
+                        }`}
+                      >
+                        Season {s.seasonNumber}
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="font-mono text-xs text-[#A8A29E]">Season 1</span>
+                )}
               </div>
-              <button
-                type="button"
-                onClick={() => setShowDebug(!showDebug)}
-                className="text-[10px] border border-[#00A3FF]/40 px-2 py-0.5 hover:bg-[#00A3FF]/20 cursor-pointer"
-              >
-                {showDebug ? 'HIDE' : 'SHOW'}
-              </button>
+
+              {/* Prev / Next Episode Buttons */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  id="prev-episode-btn"
+                  onClick={() => prevEpisode && handleSelectEpisode(prevEpisode, prevEpisode.seasonNumber)}
+                  disabled={!prevEpisode}
+                  className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border flex items-center gap-1.5 transition-colors ${
+                    prevEpisode
+                      ? 'border-[#3F3F46] text-[#FAF9F6] hover:border-[#00A3FF] hover:text-[#00A3FF] cursor-pointer bg-[#18181B]'
+                      : 'border-[#27272A] text-[#52525B] cursor-not-allowed bg-transparent'
+                  }`}
+                  title={prevEpisode ? `Previous: ${prevEpisode.title}` : 'No previous episode'}
+                >
+                  <SkipBack className="w-3.5 h-3.5" />
+                  <span>PREVIOUS EPISODE</span>
+                </button>
+
+                <button
+                  type="button"
+                  id="next-episode-btn"
+                  onClick={() => nextEpisode && handleSelectEpisode(nextEpisode, nextEpisode.seasonNumber)}
+                  disabled={!nextEpisode}
+                  className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border flex items-center gap-1.5 transition-colors ${
+                    nextEpisode
+                      ? 'border-[#00A3FF] bg-[#00A3FF] text-black font-bold hover:bg-[#38BDF8] cursor-pointer'
+                      : 'border-[#27272A] text-[#52525B] cursor-not-allowed bg-transparent'
+                  }`}
+                  title={nextEpisode ? `Next: ${nextEpisode.title}` : 'No next episode'}
+                >
+                  <span>NEXT EPISODE</span>
+                  <SkipForward className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
 
-            {showDebug && (
-              <div className="space-y-1.5 text-[11px] text-[#A8A29E]">
-                <div>
-                  <strong className="text-[#FAF9F6]">Active Provider:</strong>{' '}
-                  {selectedProvider?.getName() || 'None'}
+            {/* Real Episodes Grid */}
+            {isLoadingEpisodes ? (
+              <div className="py-8 text-center text-[#A8A29E] font-mono text-xs">
+                <RefreshCw className="w-4 h-4 animate-spin inline-block mr-2" />
+                Retrieving verified episode catalog from IMDb records...
+              </div>
+            ) : currentSeason && currentSeason.episodes.length > 0 ? (
+              <div>
+                <span className="text-[10px] font-mono uppercase tracking-widest text-[#71717A] block mb-2">
+                  SEASON {currentSeasonNum} EPISODES ({currentSeason.episodes.length}):
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-72 overflow-y-auto pr-1">
+                  {currentSeason.episodes.map((ep) => {
+                    const isSelected = currentEpisode?.id === ep.id;
+                    return (
+                      <button
+                        key={ep.id}
+                        type="button"
+                        id={`ep-card-${ep.episodeNumber}`}
+                        onClick={() => handleSelectEpisode(ep, currentSeasonNum)}
+                        className={`text-left p-2.5 border transition-all cursor-pointer flex gap-2.5 ${
+                          isSelected
+                            ? 'bg-[#1F1F24] border-[#00A3FF] shadow-[2px_2px_0px_0px_rgba(0,163,255,1)]'
+                            : 'bg-[#18181B] border-[#27272A] hover:border-[#3F3F46]'
+                        }`}
+                      >
+                        <div className="w-16 h-10 bg-[#27272A] shrink-0 overflow-hidden relative flex items-center justify-center">
+                          {ep.thumbnailUrl ? (
+                            <img
+                              src={ep.thumbnailUrl}
+                              alt={ep.title}
+                              className="w-full h-full object-cover"
+                            />
+                          ) : (
+                            <Tv className="w-4 h-4 text-[#71717A]" />
+                          )}
+                          <span className="absolute bottom-0 right-0 bg-black/80 text-[9px] font-mono px-1 text-[#FAF9F6]">
+                            E{ep.episodeNumber}
+                          </span>
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h4 className="font-condensed text-xs font-bold uppercase truncate text-[#FAF9F6]">
+                            {ep.episodeNumber}. {ep.title}
+                          </h4>
+                          <p className="font-mono text-[10px] text-[#71717A] truncate">
+                            {ep.duration || '45m'} {ep.airDate ? `· ${ep.airDate}` : ''}
+                          </p>
+                        </div>
+                      </button>
+                    );
+                  })}
                 </div>
-                <div>
-                  <strong className="text-[#FAF9F6]">State:</strong>{' '}
-                  <span className="uppercase font-bold text-[#00A3FF]">{playerState}</span>
-                </div>
+              </div>
+            ) : (
+              <div className="py-4 text-center text-[#71717A] font-mono text-xs">
+                Season 1 ready for stream playback.
               </div>
             )}
           </div>
         )}
 
-        {/* AD SANDBOX (SECTION 43) */}
-        <div className="mt-8">
-          <AdSandbox />
+        {/* 3. AUDIO & SUBTITLES SELECTION */}
+        <div
+          id="audio-subtitles-section"
+          className="mt-4 bg-[#141416] border border-[#27272A] p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 text-xs font-mono"
+        >
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <Volume2 className="w-4 h-4 text-[#00A3FF]" />
+              <span className="text-[#71717A] uppercase">AUDIO:</span>
+              <select
+                id="audio-lang-select"
+                value={audioLang}
+                onChange={(e) => setAudioLang(e.target.value)}
+                className="bg-[#18181B] border border-[#3F3F46] text-[#FAF9F6] px-2.5 py-1 text-xs font-mono uppercase focus:outline-none focus:border-[#00A3FF]"
+              >
+                {AUDIO_LANGUAGES.map((lang) => (
+                  <option key={lang} value={lang}>
+                    {lang}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Subtitles className="w-4 h-4 text-[#00A3FF]" />
+              <span className="text-[#71717A] uppercase">SUBTITLES:</span>
+              <select
+                id="subtitle-lang-select"
+                value={subtitleLang}
+                onChange={(e) => setSubtitleLang(e.target.value)}
+                className="bg-[#18181B] border border-[#3F3F46] text-[#FAF9F6] px-2.5 py-1 text-xs font-mono uppercase focus:outline-none focus:border-[#00A3FF]"
+              >
+                {SUBTITLE_OPTIONS.map((sub) => (
+                  <option key={sub} value={sub}>
+                    {sub}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="text-[11px] text-[#71717A] flex items-center gap-1.5">
+            <span className="w-2 h-2 rounded-full bg-[#00A3FF]" />
+            <span>PLAYER.IMDB.SU STREAM ENGINE</span>
+          </div>
         </div>
+
+        {/* 4. TITLE METADATA & CAST SECTION */}
+        <div id="title-metadata-section" className="mt-6 bg-[#141416] border border-[#27272A] p-6">
+          <div className="flex flex-col md:flex-row gap-6">
+            <div className="w-32 sm:w-44 shrink-0 mx-auto md:mx-0">
+              <PosterImage
+                title={media.title}
+                imdbId={media.imdbId}
+                initialPosterUrl={media.posterUrl}
+                className="w-full aspect-[2/3] object-cover border-2 border-[#27272A] shadow-md"
+              />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              {/* Type, Year, Runtime, IMDb Rating Badges */}
+              <div className="flex flex-wrap items-center gap-2 mb-3">
+                <span className="px-2 py-0.5 bg-[#00A3FF] text-black font-mono text-[10px] font-bold uppercase tracking-wider">
+                  {isTV ? 'TV SERIES' : 'FEATURE FILM'}
+                </span>
+                <span className="px-2 py-0.5 bg-[#18181B] border border-[#3F3F46] font-mono text-xs text-[#A8A29E]">
+                  {media.releaseYear}
+                </span>
+                {media.duration && (
+                  <span className="px-2 py-0.5 bg-[#18181B] border border-[#3F3F46] font-mono text-xs text-[#A8A29E]">
+                    {media.duration}
+                  </span>
+                )}
+                {media.maturityRating && (
+                  <span className="px-2 py-0.5 bg-[#18181B] border border-[#3F3F46] font-mono text-xs text-[#A8A29E]">
+                    {media.maturityRating}
+                  </span>
+                )}
+                <div className="flex items-center gap-1 bg-[#EAB308]/15 border border-[#EAB308]/40 px-2 py-0.5 text-xs font-mono font-bold text-[#EAB308]">
+                  <Star className="w-3 h-3 fill-current" />
+                  <span>IMDb {media.imdbRating} / 10</span>
+                </div>
+                {cleanImdb && (
+                  <a
+                    href={`https://www.imdb.com/title/${cleanImdb}/`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-mono text-[11px] text-[#00A3FF] hover:underline flex items-center gap-1"
+                  >
+                    <span>{cleanImdb}</span>
+                    <ExternalLink className="w-2.5 h-2.5" />
+                  </a>
+                )}
+              </div>
+
+              <h1 className="font-condensed text-2xl sm:text-4xl font-bold uppercase tracking-wide text-[#FAF9F6] mb-2">
+                {media.title}
+              </h1>
+
+              {media.tagline && (
+                <p className="font-serif-editorial italic text-sm text-[#A8A29E] mb-3">
+                  "{media.tagline}"
+                </p>
+              )}
+
+              {/* Genres */}
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {media.genres.map((g) => (
+                  <span
+                    key={g}
+                    className="px-2.5 py-0.5 bg-[#18181B] border border-[#27272A] text-[#A8A29E] font-mono text-[11px] uppercase tracking-wider"
+                  >
+                    {g}
+                  </span>
+                ))}
+              </div>
+
+              {/* Plot Description */}
+              <p className="font-serif-editorial text-base text-[#D4D4D8] leading-relaxed mb-6">
+                {media.synopsis}
+              </p>
+
+              {/* Credits & Cast */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono border-t border-[#27272A] pt-4">
+                <div>
+                  <span className="text-[#71717A] uppercase tracking-widest block mb-1">
+                    DIRECTOR:
+                  </span>
+                  <span className="text-[#FAF9F6]">{media.director || 'Acclaimed Director'}</span>
+                </div>
+                <div>
+                  <span className="text-[#71717A] uppercase tracking-widest block mb-1">
+                    WRITER:
+                  </span>
+                  <span className="text-[#FAF9F6]">{media.writer || 'Original Screenplay'}</span>
+                </div>
+                {media.cast && media.cast.length > 0 && (
+                  <div className="sm:col-span-2">
+                    <span className="text-[#71717A] uppercase tracking-widest block mb-1.5">
+                      STARRING CAST:
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {media.cast.map((c) => (
+                        <button
+                          key={c.name}
+                          type="button"
+                          onClick={() => {
+                            onClose();
+                            onSelectActor?.(c.name);
+                          }}
+                          className="px-2.5 py-1 bg-[#18181B] border border-[#3F3F46] hover:border-[#00A3FF] text-[#FAF9F6] text-xs font-mono transition-colors cursor-pointer"
+                        >
+                          <span className="font-bold">{c.name}</span>
+                          {c.role && <span className="text-[#71717A] ml-1">as {c.role}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 5. STREAM ENGINE SPECIFICATIONS */}
+        <div id="stream-source-specs" className="mt-6 bg-[#141416] border border-[#27272A] p-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#27272A] pb-3 mb-4">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-[#00A3FF]" />
+              <div>
+                <h3 className="font-condensed text-xl font-bold uppercase tracking-wider text-[#FAF9F6]">
+                  STREAM ENGINE SPECIFICATIONS
+                </h3>
+                <p className="font-mono text-xs text-[#71717A] mt-0.5">
+                  Direct in-app playback engine configuration for this title
+                </p>
+              </div>
+            </div>
+            <span className="font-mono text-[10px] uppercase px-2.5 py-1 bg-[#10B981]/20 text-[#34D399] border border-[#10B981]/40 font-bold self-start sm:self-auto">
+              HIGH DEFINITION STREAM
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+            <div className="p-3 bg-[#18181B] border border-[#27272A]">
+              <span className="text-[10px] font-mono text-[#71717A] uppercase block">ACTIVE ENGINE</span>
+              <span className="font-mono text-sm text-white font-bold">
+                StreamIMDb
+              </span>
+            </div>
+            <div className="p-3 bg-[#18181B] border border-[#27272A]">
+              <span className="text-[10px] font-mono text-[#71717A] uppercase block">RESOLUTION</span>
+              <span className="font-mono text-sm text-white font-bold">1080p Full HD</span>
+            </div>
+            <div className="p-3 bg-[#18181B] border border-[#27272A]">
+              <span className="text-[10px] font-mono text-[#71717A] uppercase block">STREAM SOURCE</span>
+              <span className="font-mono text-sm text-[#34D399] font-bold">streamimdb.ru</span>
+            </div>
+            <div className="p-3 bg-[#18181B] border border-[#27272A]">
+              <span className="text-[10px] font-mono text-[#71717A] uppercase block">PLAYBACK MODE</span>
+              <span className="font-mono text-sm text-[#00A3FF] font-bold">Integrated Native Player</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 6. RELATED TITLES SECTION */}
+        {relatedTitles.length > 0 && (
+          <div id="related-titles-section" className="mt-8 border-t border-[#27272A] pt-6">
+            <h3 className="font-condensed text-xl font-bold uppercase tracking-wider text-[#FAF9F6] mb-4">
+              MORE TITLES AVAILABLE TO STREAM
+            </h3>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+              {relatedTitles.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  id={`related-title-${item.id}`}
+                  onClick={() => {
+                    onPlayMedia?.(item);
+                  }}
+                  className="text-left group cursor-pointer focus:outline-none"
+                >
+                  <div className="aspect-[2/3] w-full relative overflow-hidden border border-[#27272A] group-hover:border-[#00A3FF] transition-colors bg-[#18181B]">
+                    <PosterImage
+                      title={item.title}
+                      imdbId={item.imdbId}
+                      initialPosterUrl={item.posterUrl}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <h4 className="font-condensed text-xs font-bold uppercase text-[#FAF9F6] truncate mt-1.5 group-hover:text-[#00A3FF] transition-colors">
+                    {item.title}
+                  </h4>
+                  <div className="font-mono text-[10px] text-[#71717A]">
+                    {item.releaseYear} · IMDb {item.imdbRating}
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

@@ -1,4 +1,4 @@
-import { MediaItem, CastMember, StreamingProvider } from '../types';
+import { MediaItem, CastMember, StreamingProvider, Season, Episode } from '../types';
 import { extractImdbId, validateImdbId } from '../utils/imdb';
 
 export interface ImdbSearchResultItem {
@@ -86,10 +86,58 @@ export function parseCastMembers(starsString?: string): CastMember[] {
   return names.map((name) => ({
     name,
     role: 'Lead Cast',
-    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=300&q=80',
     knownFor: [name],
     bio: `Celebrated performer featuring in major television and cinematic productions.`,
   }));
+}
+
+/**
+ * In-memory cache for IMDb poster lookups
+ */
+const posterCache = new Map<string, string | null>();
+
+/**
+ * Fetches the real official poster for an IMDb title by its ID.
+ * Returns null if no legitimate poster exists.
+ */
+export async function fetchImdbPosterById(rawId: string): Promise<string | null> {
+  const cleanId = extractImdbId(rawId) || rawId.trim().toLowerCase();
+  if (!cleanId || !validateImdbId(cleanId)) return null;
+
+  if (posterCache.has(cleanId)) {
+    return posterCache.get(cleanId) || null;
+  }
+
+  try {
+    const res = await fetch(`/api/imdb-title?id=${encodeURIComponent(cleanId)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.posterUrl) {
+        posterCache.set(cleanId, data.posterUrl);
+        return data.posterUrl;
+      }
+    }
+  } catch (err) {
+    console.warn(`Failed to fetch official IMDb poster for ${cleanId}:`, err);
+  }
+
+  // Fallback: try search proxy with the ID directly
+  try {
+    const res = await fetch(`/api/imdb-search?q=${encodeURIComponent(cleanId)}`);
+    if (res.ok) {
+      const data = await res.json();
+      const match = (data.d || []).find((it: any) => it.id === cleanId) || data.d?.[0];
+      if (match?.i?.imageUrl) {
+        posterCache.set(cleanId, match.i.imageUrl);
+        return match.i.imageUrl;
+      }
+    }
+  } catch (err) {
+    // Ignore fallback failure
+  }
+
+  posterCache.set(cleanId, null);
+  return null;
 }
 
 /**
@@ -123,6 +171,7 @@ export function detectPlatformAssociation(title: string, rawType?: string): Stre
 
 /**
  * Transforms an IMDb search result record into the application's MediaItem structure.
+ * Uses the genuine official poster directly from IMDb with NO dummy or placeholder URLs.
  */
 export function transformImdbResultToMedia(item: ImdbSearchResultItem): MediaItem {
   const isTV =
@@ -133,8 +182,8 @@ export function transformImdbResultToMedia(item: ImdbSearchResultItem): MediaIte
   const cast = parseCastMembers(item.s);
   const detectedPlatform = detectPlatformAssociation(item.l, item.q);
 
-  const cleanPoster = item.i?.imageUrl ||
-    'https://images.unsplash.com/photo-1536440136628-849c177e76a1?auto=format&fit=crop&w=600&h=900&q=80';
+  // Real official poster directly from IMDb
+  const cleanPoster = item.i?.imageUrl || '';
 
   return {
     id: item.id,
@@ -166,43 +215,74 @@ export function transformImdbResultToMedia(item: ImdbSearchResultItem): MediaIte
     videoUrl: '',
     neighborhoodBadge: 'IMDb Certified Record',
     cast,
-    seasons: isTV
-      ? [
-          {
-            seasonNumber: 1,
-            title: 'Season 1',
-            episodes: [
-              {
-                id: `${item.id}-s1e1`,
-                imdbId: item.id,
-                episodeNumber: 1,
-                seasonNumber: 1,
-                title: 'Episode 1',
-                synopsis: `First chapter of ${item.l}. Available for stream playback via registered provider.`,
-                duration: '54m',
-                durationSeconds: 3240,
-                thumbnailUrl: cleanPoster,
-                releaseDate: String(item.y || '2023'),
-                videoUrl: '',
-              },
-              {
-                id: `${item.id}-s1e2`,
-                imdbId: item.id,
-                episodeNumber: 2,
-                seasonNumber: 1,
-                title: 'Episode 2',
-                synopsis: `Second chapter of ${item.l}. Continuing the archival serial storyline.`,
-                duration: '52m',
-                durationSeconds: 3120,
-                thumbnailUrl: cleanPoster,
-                releaseDate: String(item.y || '2023'),
-                videoUrl: '',
-              },
-            ],
-          },
-        ]
-      : undefined,
+    seasons: isTV ? [] : undefined,
   };
+}
+
+const tvSeasonsCache = new Map<string, Season[]>();
+
+/**
+ * Fetches verified real TV series seasons and episodes by IMDb ID.
+ * Returns actual episodes with names, air dates, summaries, runtimes, and thumbnails.
+ */
+export async function fetchTvSeasonsAndEpisodes(imdbId: string): Promise<Season[]> {
+  const cleanId = extractImdbId(imdbId);
+  if (!cleanId) return [];
+
+  if (tvSeasonsCache.has(cleanId)) {
+    return tvSeasonsCache.get(cleanId)!;
+  }
+
+  try {
+    const showRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${cleanId}`);
+    if (!showRes.ok) return [];
+    const show = await showRes.json();
+    if (!show || !show.id) return [];
+
+    const epRes = await fetch(`https://api.tvmaze.com/shows/${show.id}/episodes`);
+    if (!epRes.ok) return [];
+    const rawEpisodes = await epRes.json();
+    if (!Array.isArray(rawEpisodes) || rawEpisodes.length === 0) return [];
+
+    // Group episodes by season
+    const seasonsMap = new Map<number, Episode[]>();
+    for (const ep of rawEpisodes) {
+      const sNum = ep.season || 1;
+      const cleanSummary = (ep.summary || '').replace(/<\/?[^>]+(>|$)/g, '').trim();
+      const epObj: Episode = {
+        id: `${cleanId}-s${sNum}e${ep.number || 1}`,
+        imdbId: cleanId,
+        episodeNumber: ep.number || 1,
+        seasonNumber: sNum,
+        title: ep.name || `Episode ${ep.number}`,
+        duration: ep.runtime ? `${ep.runtime}m` : '50m',
+        durationSeconds: (ep.runtime || 50) * 60,
+        synopsis: cleanSummary || `Season ${sNum}, Episode ${ep.number || 1}.`,
+        releaseDate: ep.airdate || '',
+        thumbnailUrl: ep.image?.original || ep.image?.medium || '',
+        videoUrl: '',
+      };
+
+      if (!seasonsMap.has(sNum)) {
+        seasonsMap.set(sNum, []);
+      }
+      seasonsMap.get(sNum)!.push(epObj);
+    }
+
+    const seasons: Season[] = Array.from(seasonsMap.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([seasonNum, episodes]) => ({
+        seasonNumber: seasonNum,
+        title: `Season ${seasonNum}`,
+        episodes: episodes.sort((a, b) => a.episodeNumber - b.episodeNumber),
+      }));
+
+    tvSeasonsCache.set(cleanId, seasons);
+    return seasons;
+  } catch (err) {
+    console.warn('Could not fetch real TV episodes from TVMaze:', err);
+    return [];
+  }
 }
 
 /**

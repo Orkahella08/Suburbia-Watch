@@ -4,8 +4,8 @@
  */
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { MediaItem, WatchProgress, NavTab, StreamingProvider } from './types';
-import { MEDIA_ITEMS, PROVIDERS_LIST } from './data/mockData';
+import { MediaItem, WatchProgress, NavTab } from './types';
+import { MEDIA_ITEMS } from './data/mockData';
 import {
   getStoredWatchlist,
   saveStoredWatchlist,
@@ -22,10 +22,9 @@ import { ActorBioModal } from './components/ActorBioModal';
 import { MoviesView } from './components/MoviesView';
 import { TVShowsView } from './components/TVShowsView';
 import { GenresView } from './components/GenresView';
-import { ProvidersView } from './components/ProvidersView';
 import { SearchView } from './components/SearchView';
 import { WatchlistView } from './components/WatchlistView';
-import { ExploreStreamingPlatforms } from './components/ExploreStreamingPlatforms';
+import { StreamingPlatformExplorer } from './components/StreamingPlatformExplorer';
 import { fetchCuratedImdbCatalogue } from './services/imdbService';
 import { Footer } from './components/Footer';
 import { ArrowRight, Sparkles, Star } from 'lucide-react';
@@ -48,10 +47,6 @@ export default function App() {
 
   // Active Actor Bio State
   const [selectedActor, setSelectedActor] = useState<string | null>(null);
-
-  // Active Provider Filter on Homepage
-  const [homeSelectedProvider, setHomeSelectedProvider] = useState<StreamingProvider>('HBO Max');
-  const [homeSelectedPlatform, setHomeSelectedPlatform] = useState<string | null>(null);
 
   // Real detected IMDb catalogue
   const [catalogMedia, setCatalogMedia] = useState<MediaItem[]>(MEDIA_ITEMS);
@@ -161,25 +156,6 @@ export default function App() {
     () => catalogMedia.filter((i) => i.criticallyAcclaimed || i.imdbRating >= 8.2),
     [catalogMedia]
   );
-  const providerItems = useMemo(
-    () =>
-      catalogMedia.filter(
-        (i) =>
-          i.streamingProvider === homeSelectedProvider ||
-          i.availableProviders?.includes(homeSelectedProvider)
-      ),
-    [catalogMedia, homeSelectedProvider]
-  );
-
-  const platformFilteredItems = useMemo(() => {
-    if (!homeSelectedPlatform) return [];
-    const query = homeSelectedPlatform.toLowerCase();
-    return catalogMedia.filter(
-      (i) =>
-        i.streamingProvider?.toLowerCase().includes(query) ||
-        i.availableProviders?.some((p) => p.toLowerCase().includes(query))
-    );
-  }, [catalogMedia, homeSelectedPlatform]);
 
   // If Player view is active
   if (playingMedia) {
@@ -193,8 +169,9 @@ export default function App() {
           onUpdateProgress={handleUpdateProgress}
           savedProgress={progressMap[playingMedia.media.id]}
           onSelectActor={(actorName) => setSelectedActor(actorName)}
+          onPlayMedia={(item, seasonNum, epId) => handlePlay(item, seasonNum, epId)}
           onPlayNextMedia={(nextMedia) => handlePlay(nextMedia)}
-          allMedia={MEDIA_ITEMS}
+          allMedia={catalogMedia}
         />
 
         {/* Actor bio if opened from player */}
@@ -235,58 +212,7 @@ export default function App() {
         {currentTab === 'home' && (
           <div>
             <div className="max-w-7xl mx-auto px-4 sm:px-8 pt-8 sm:pt-10">
-              {/* 1. EXPLORE STREAMING PLATFORMS (DISTRIBUTION INDEX · CATALOGUE FILTERING) */}
-              <ExploreStreamingPlatforms
-                selectedPlatform={homeSelectedPlatform}
-                onSelectPlatform={setHomeSelectedPlatform}
-              />
-
-              {/* DYNAMIC PLATFORM FILTERED REEL */}
-              {homeSelectedPlatform && (
-                <section id="section-platform-filtered" className="mb-12 border-2 border-[#141414] bg-[#F4F1EA] p-6 sm:p-8">
-                  <div className="flex items-baseline justify-between border-b-2 border-[#141414] pb-3 mb-6">
-                    <div>
-                      <div className="text-[10px] font-mono uppercase tracking-widest text-[#78716C]">
-                        NETWORK CATALOGUE REEL · {homeSelectedPlatform}
-                      </div>
-                      <h2 className="font-condensed text-3xl sm:text-4xl font-bold uppercase tracking-tight text-[#141414]">
-                        {homeSelectedPlatform.toUpperCase()} ARCHIVE
-                      </h2>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setHomeSelectedPlatform(null)}
-                      className="font-condensed text-xs uppercase tracking-wider font-bold text-[#141414] underline hover:text-[#57534E] cursor-pointer"
-                    >
-                      CLEAR FILTER
-                    </button>
-                  </div>
-
-                  {platformFilteredItems.length > 0 ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-                      {platformFilteredItems.map((item) => (
-                        <EditorialMovieCard
-                          key={item.id}
-                          item={item}
-                          onPlay={handlePlay}
-                          onOpenDetails={(film) => setDetailItem(film)}
-                          watchlist={watchlist}
-                          onToggleWatchlist={handleToggleWatchlist}
-                          onSelectActor={(actorName) => setSelectedActor(actorName)}
-                        />
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-8 text-center border border-[#141414]/20 bg-[#FAF9F6]">
-                      <p className="font-serif-editorial text-sm text-[#57534E]">
-                        No titles currently detected for {homeSelectedPlatform}. Try another platform or browse all films.
-                      </p>
-                    </div>
-                  )}
-                </section>
-              )}
-
-              {/* 2. CONTINUE WATCHING (ACTIVE PROJECTIONS · LOCAL PROGRESS) */}
+              {/* 1. CONTINUE WATCHING (ACTIVE PROJECTIONS · LOCAL PROGRESS) */}
               <ContinueWatchingShelf
                 progressList={progressList}
                 allMedia={catalogMedia}
@@ -295,7 +221,7 @@ export default function App() {
               />
             </div>
 
-            {/* 3. HERO CAROUSEL: Large 16:9 cinematic landscape artwork (Section 15 & 16) */}
+            {/* 2. HERO CAROUSEL: Large 16:9 cinematic landscape artwork (Section 15 & 16) */}
             <HeroBanner
               featuredItems={featuredItems}
               onPlay={handlePlay}
@@ -305,6 +231,15 @@ export default function App() {
             />
 
             <div className="max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-12">
+              {/* STREAMING PLATFORMS & POPULAR / IN-DEMAND EXPLORER */}
+              <StreamingPlatformExplorer
+                items={catalogMedia}
+                onPlay={handlePlay}
+                onOpenDetails={(film) => setDetailItem(film)}
+                watchlist={watchlist}
+                onToggleWatchlist={handleToggleWatchlist}
+                onSelectActor={(actorName) => setSelectedActor(actorName)}
+              />
 
               {/* 1. FEATURED FILMS (Section 15) */}
               <section id="section-featured-films" className="mb-14">
@@ -482,61 +417,6 @@ export default function App() {
                   ))}
                 </div>
               </section>
-
-              {/* 6. WATCH BY PROVIDER (Section 15) */}
-              <section id="section-watch-by-provider" className="mb-8">
-                <div className="flex flex-col sm:flex-row sm:items-baseline justify-between border-b-2 border-[#141414] pb-3 mb-6 gap-2">
-                  <div>
-                    <div className="text-[10px] font-mono uppercase tracking-widest text-[#78716C]">
-                      STREAMING PLATFORMS · INTERNATIONAL DISTRIBUTION
-                    </div>
-                    <h2 className="font-condensed text-3xl sm:text-4xl font-bold uppercase tracking-tight text-[#141414]">
-                      WATCH BY PROVIDER
-                    </h2>
-                  </div>
-                  <button
-                    onClick={() => {
-                      setCurrentTab('providers');
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }}
-                    className="font-condensed text-xs uppercase tracking-wider font-bold text-[#141414] hover:text-[#57534E] flex items-center gap-1 cursor-pointer py-1"
-                  >
-                    <span>EXPLORE ALL PLATFORMS</span>
-                    <ArrowRight className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-
-                {/* Provider Selector Buttons */}
-                <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-6 scrollbar-none">
-                  {PROVIDERS_LIST.map((provider) => (
-                    <button
-                      key={provider}
-                      onClick={() => setHomeSelectedProvider(provider)}
-                      className={`px-3.5 py-1.5 text-xs font-condensed uppercase tracking-wider shrink-0 transition-colors cursor-pointer border ${
-                        homeSelectedProvider === provider
-                          ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] font-bold'
-                          : 'bg-[#F4F1EA] text-[#141414] border-[#141414]/30 hover:border-[#141414]'
-                      }`}
-                    >
-                      {provider}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 sm:gap-6">
-                  {providerItems.slice(0, 6).map((item) => (
-                    <EditorialMovieCard
-                      key={item.id}
-                      item={item}
-                      onPlay={handlePlay}
-                      onOpenDetails={(film) => setDetailItem(film)}
-                      watchlist={watchlist}
-                      onToggleWatchlist={handleToggleWatchlist}
-                      onSelectActor={(actorName) => setSelectedActor(actorName)}
-                    />
-                  ))}
-                </div>
-              </section>
             </div>
           </div>
         )}
@@ -573,20 +453,6 @@ export default function App() {
         {currentTab === 'genres' && (
           <div className="max-w-7xl mx-auto px-4 sm:px-8">
             <GenresView
-              items={catalogMedia}
-              onPlay={handlePlay}
-              onOpenDetails={(item) => setDetailItem(item)}
-              watchlist={watchlist}
-              onToggleWatchlist={handleToggleWatchlist}
-              onSelectActor={(actorName) => setSelectedActor(actorName)}
-            />
-          </div>
-        )}
-
-        {/* PROVIDERS TAB VIEW (Section 31) */}
-        {currentTab === 'providers' && (
-          <div className="max-w-7xl mx-auto px-4 sm:px-8">
-            <ProvidersView
               items={catalogMedia}
               onPlay={handlePlay}
               onOpenDetails={(item) => setDetailItem(item)}

@@ -1,6 +1,7 @@
 import React from 'react';
 import { MediaItem, WatchProgress } from '../types';
 import { Play, Trash2, Clock, Film, Tv } from 'lucide-react';
+import { PosterImage } from './PosterImage';
 
 interface ContinueWatchingShelfProps {
   progressList: WatchProgress[];
@@ -55,12 +56,17 @@ export const ContinueWatchingShelf: React.FC<ContinueWatchingShelfProps> = ({
             >
               {/* Poster thumbnail (2:3) */}
               <div className="relative w-16 sm:w-20 aspect-[2/3] bg-[#141414] shrink-0 overflow-hidden border border-[#141414]">
-                <img
+                <PosterImage
                   src={media.posterUrl}
                   alt={media.title}
-                  className="w-full h-full object-cover film-photo-treatment"
+                  imdbId={media.imdbId}
+                  title={media.title}
+                  year={media.releaseYear}
+                  aspectRatio="2/3"
+                  loading="lazy"
+                  imgClassName="film-photo-treatment"
                 />
-                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center">
+                <div className="absolute inset-0 bg-black/30 group-hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
                   <div className="w-7 h-7 bg-[#FAF9F6] text-[#141414] flex items-center justify-center rounded-full shadow-md">
                     <Play className="w-3.5 h-3.5 fill-current translate-x-0.5" />
                   </div>

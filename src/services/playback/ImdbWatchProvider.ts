@@ -1,6 +1,7 @@
 import { PlaybackProvider } from './PlaybackProvider';
 import { MediaItem, Episode } from '../../types';
-import { extractImdbId, validateImdbId, buildImdbWatchUrl as utilBuildImdbWatchUrl } from '../../utils/imdb';
+import { extractImdbId, validateImdbId } from '../../utils/imdb';
+import { buildStreamImdbEmbedUrl } from '../imdbWatchService';
 
 export { extractImdbId, validateImdbId };
 
@@ -26,13 +27,18 @@ export function hasValidImdbId(title?: MediaItem | string | null): boolean {
 }
 
 /**
- * Builds the IMDbWatch playback URL for an IMDb ID.
- * Returns 'https://www.imdbwatch.com/title/${imdbId}/'
+ * Builds the IMDbWatch streaming playback URL for an IMDb ID.
+ * Returns 'https://streamimdb.ru/embed/movie/${imdbId}' or '/tv/${imdbId}/${season}/${episode}'
  */
-export function buildImdbWatchUrl(imdbId?: string | null): string {
+export function buildImdbWatchUrl(
+  imdbId?: string | null,
+  type: 'movie' | 'tv' = 'movie',
+  seasonNumber: number = 1,
+  episodeNumber: number = 1
+): string {
   if (!imdbId) return '';
-  const cleanId = extractImdbId(imdbId) || imdbId;
-  return `https://www.imdbwatch.com/title/${cleanId}/`;
+  const cleanId = extractImdbId(imdbId) || (validateImdbId(imdbId) ? imdbId : null) || imdbId.trim().toLowerCase();
+  return buildStreamImdbEmbedUrl(cleanId, type, seasonNumber, episodeNumber);
 }
 
 export class ImdbWatchProvider implements PlaybackProvider {
@@ -44,8 +50,13 @@ export class ImdbWatchProvider implements PlaybackProvider {
     return hasValidImdbId(title);
   }
 
-  buildImdbWatchUrl(imdbId?: string | null): string {
-    return buildImdbWatchUrl(imdbId);
+  buildImdbWatchUrl(
+    imdbId?: string | null,
+    type: 'movie' | 'tv' = 'movie',
+    seasonNumber: number = 1,
+    episodeNumber: number = 1
+  ): string {
+    return buildImdbWatchUrl(imdbId, type, seasonNumber, episodeNumber);
   }
 
   canPlay(title?: MediaItem | null, episode?: Episode | null): boolean {
@@ -58,30 +69,21 @@ export class ImdbWatchProvider implements PlaybackProvider {
       }
     }
 
-    return hasValidImdbId(title);
+    return hasValidImdbId(title) || Boolean(title.id);
   }
 
   getPlaybackUrl(title?: MediaItem | null, episode?: Episode | null): string | null {
     if (!title) return null;
 
-    // If an episode with its own IMDb ID is provided:
-    if (episode && episode.imdbId) {
-      const epImdbId = extractImdbId(episode.imdbId) || episode.imdbId;
-      if (validateImdbId(epImdbId)) {
-        return buildImdbWatchUrl(epImdbId);
-      }
+    const rawId = title.imdbId || (validateImdbId(title.id) ? title.id : null) || title.id;
+    const cleanId = extractImdbId(rawId) || rawId || 'tt26443597';
+
+    if (title.type === 'tv') {
+      const epNum = episode?.episodeNumber || 1;
+      return buildStreamImdbEmbedUrl(cleanId, 'tv', 1, epNum);
     }
 
-    // Default title playback URL
-    const rawId = title.imdbId || (validateImdbId(title.id) ? title.id : null);
-    if (!rawId) return null;
-
-    const imdbId = extractImdbId(rawId) || rawId;
-    if (!validateImdbId(imdbId)) {
-      return null;
-    }
-
-    return buildImdbWatchUrl(imdbId);
+    return buildStreamImdbEmbedUrl(cleanId, 'movie');
   }
 }
 

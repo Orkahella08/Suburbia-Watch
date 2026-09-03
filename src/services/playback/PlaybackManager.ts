@@ -1,4 +1,5 @@
 import { PlaybackProvider } from './PlaybackProvider';
+import { OfficialPlaybackProvider } from './OfficialPlaybackProvider';
 import { ImdbWatchProvider } from './ImdbWatchProvider';
 import { MediaItem, Episode } from '../../types';
 
@@ -29,5 +30,9 @@ export class PlaybackManager {
   }
 }
 
-// Configured with verified actual playback providers only (no fake providers)
-export const defaultPlaybackManager = new PlaybackManager([new ImdbWatchProvider()]);
+// Configured with IMDbWatch (StreamIMDb) and Official Studio Embed providers
+export const defaultPlaybackManager = new PlaybackManager([
+  new ImdbWatchProvider(),
+  new OfficialPlaybackProvider(),
+]);
+

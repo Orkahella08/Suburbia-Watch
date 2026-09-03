@@ -1,6 +1,7 @@
 import React from 'react';
 import { MediaItem, WatchProgress } from '../types';
 import { Play, Plus, Check, Star, Info, Trash2 } from 'lucide-react';
+import { PosterImage } from './PosterImage';
 
 interface MediaCardProps {
   item: MediaItem;
@@ -24,7 +25,7 @@ export const MediaCard: React.FC<MediaCardProps> = ({
   aspectRatio = 'backdrop',
 }) => {
   const isPoster = aspectRatio === 'poster';
-  const imageUrl = isPoster ? item.posterUrl : item.backdropUrl;
+  const imageUrl = isPoster ? item.posterUrl : (item.backdropUrl || item.posterUrl);
 
   const percentWatched = progress && progress.totalSeconds > 0
     ? Math.min(100, Math.round((progress.progressSeconds / progress.totalSeconds) * 100))
@@ -43,12 +44,15 @@ export const MediaCard: React.FC<MediaCardProps> = ({
     >
       {/* Image Container */}
       <div className={`relative w-full overflow-hidden ${isPoster ? 'h-[250px] sm:h-[290px]' : 'h-[155px] sm:h-[185px]'}`}>
-        <img
+        <PosterImage
           src={imageUrl}
           alt={item.title}
+          imdbId={item.imdbId}
+          title={item.title}
+          year={item.releaseYear}
+          aspectRatio={isPoster ? '2/3' : '16/9'}
           loading="lazy"
-          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-          referrerPolicy="no-referrer"
+          imgClassName="transition-transform duration-500 group-hover:scale-105"
         />
 
         {/* Gradient overlay */}

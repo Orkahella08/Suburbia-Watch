@@ -7,6 +7,8 @@ interface HeaderProps {
   currentTab: NavTab;
   onSelectTab: (tab: NavTab) => void;
   watchlistCount: number;
+  selectedCountry?: string;
+  onSelectCountry?: (countryCode: string) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,13 +18,12 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Exact navigation from Section 15
+  // Navigation links
   const navLinks: { id: NavTab; label: string }[] = [
     { id: 'home', label: 'HOME' },
     { id: 'movies', label: 'MOVIES' },
     { id: 'tv', label: 'TV SHOWS' },
     { id: 'genres', label: 'GENRES' },
-    { id: 'providers', label: 'PROVIDERS' },
     { id: 'search', label: 'SEARCH' },
   ];
 

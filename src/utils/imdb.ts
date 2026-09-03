@@ -50,19 +50,36 @@ export function validateImdbId(id?: string | null): boolean {
 }
 
 /**
- * Generates the direct IMDbWatch title playback URL.
- * Example: buildImdbWatchUrl("tt0371746") -> "https://www.imdbwatch.com/title/tt0371746/"
- *
- * CRITICAL RULE: NEVER use plugin.html for playback!
- * CORRECT: https://www.imdbwatch.com/title/tt0371746/
- * WRONG: https://imdbwatch.com/video/plugin.html
+ * Generates the direct streamimdb.ru title playback URL.
+ * Example: buildImdbWatchUrl("tt26443597") -> "https://streamimdb.ru/embed/movie/tt26443597"
  */
 export function buildImdbWatchUrl(imdbId?: string | null): string | null {
   const normalized = extractImdbId(imdbId);
   if (!normalized || !validateImdbId(normalized)) {
     return null;
   }
-  return `https://www.imdbwatch.com/title/${normalized}/`;
+  return `https://streamimdb.ru/embed/movie/${normalized}`;
+}
+
+/**
+ * Translates an IMDb ID into an in-app stream embed URL via streamimdb.ru.
+ * Example movie: buildStreamImdbUrl("tt26443597", "movie") -> "https://streamimdb.ru/embed/movie/tt26443597"
+ * TV series: buildStreamImdbUrl("tt6226232", "tv") -> "https://streamimdb.ru/embed/tv/tt6226232"
+ */
+export function buildStreamImdbUrl(
+  imdbId?: string | null,
+  type: 'movie' | 'tv' = 'movie',
+  seasonNumber: number = 1,
+  episodeNumber: number = 1
+): string {
+  const normalized = extractImdbId(imdbId) || (imdbId ? imdbId.trim().toLowerCase() : 'tt6226232');
+  if (type === 'tv') {
+    if (seasonNumber > 1 || episodeNumber > 1) {
+      return `https://streamimdb.ru/embed/tv/${normalized}/${seasonNumber}/${episodeNumber}`;
+    }
+    return `https://streamimdb.ru/embed/tv/${normalized}`;
+  }
+  return `https://streamimdb.ru/embed/movie/${normalized}`;
 }
 
 /**

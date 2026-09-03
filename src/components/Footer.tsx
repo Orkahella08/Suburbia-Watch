@@ -49,12 +49,6 @@ export const Footer: React.FC<FooterProps> = ({ onSelectTab }) => {
               Genres
             </button>
             <button
-              onClick={() => onSelectTab('providers')}
-              className="hover:text-[#57534E] cursor-pointer"
-            >
-              Providers
-            </button>
-            <button
               onClick={() => onSelectTab('search')}
               className="hover:text-[#57534E] cursor-pointer"
             >

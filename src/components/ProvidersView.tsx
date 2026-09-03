@@ -13,7 +13,7 @@ interface ProvidersViewProps {
   onSelectActor?: (actorName: string) => void;
 }
 
-const PROVIDER_INFO: Record<StreamingProvider, { description: string; regionNote: string }> = {
+const PROVIDER_INFO: Record<string, { description: string; regionNote: string }> = {
   Netflix: {
     description: 'Pioneering global digital distributor featuring acclaimed original series and auteur acquisitions.',
     regionNote: 'Global availability subject to localized distributor territorial rights.',
@@ -21,6 +21,10 @@ const PROVIDER_INFO: Record<StreamingProvider, { description: string; regionNote
   'HBO Max': {
     description: 'Prestige serials, Warner Bros. cinematic library, and seminal high-budget television drama.',
     regionNote: 'Available in North America, Latin America, and European Max territories.',
+  },
+  Max: {
+    description: 'Warner Bros. Discovery streaming platform featuring HBO, DC, and Warner Bros. movies.',
+    regionNote: 'Available in North America, Latin America, Europe, and expanding globally.',
   },
   'Disney+': {
     description: 'Epic historical dramas, prestigious international co-productions, and sprawling multi-season sagas.',
@@ -38,9 +42,33 @@ const PROVIDER_INFO: Record<StreamingProvider, { description: string; regionNote
     description: 'Major studio blockbusters, celebrated theatrical auteur awards contenders, and worldwide streaming originals.',
     regionNote: 'Worldwide availability across 200+ territories.',
   },
+  'Prime Video': {
+    description: 'Major studio blockbusters, celebrated theatrical auteur awards contenders, and worldwide streaming originals.',
+    regionNote: 'Worldwide availability across 200+ territories.',
+  },
   'Apple TV+': {
     description: 'Curated auteur dramas, visually opulent science fiction, and Emmy/Oscar-winning boutique productions.',
     regionNote: 'Global availability via the Apple TV ecosystem and modern web browsers.',
+  },
+  'Apple TV': {
+    description: 'Curated auteur dramas, visually opulent science fiction, and Emmy/Oscar-winning boutique productions.',
+    regionNote: 'Global availability via the Apple TV ecosystem and modern web browsers.',
+  },
+  'Paramount+': {
+    description: 'Paramount pictures, CBS network classics, and exclusive streaming productions.',
+    regionNote: 'Available across North America, Latin America, Australia, and Europe.',
+  },
+  Peacock: {
+    description: 'Universal Pictures, NBC classics, and premier live television programming.',
+    regionNote: 'Available in the United States and select European territories.',
+  },
+  YouTube: {
+    description: 'Worldwide video platform with official movie rentals, digital storefronts, and creator content.',
+    regionNote: 'Available worldwide across all major devices.',
+  },
+  'Google TV': {
+    description: 'Google digital storefront for movie purchases, 4K digital rentals, and library aggregation.',
+    regionNote: 'Available worldwide across Android, Google TV, and web browsers.',
   },
 };
 

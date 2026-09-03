@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { MediaItem } from '../types';
 import { Play, Bookmark, BookmarkCheck, Info, Star, ChevronRight, ChevronLeft } from 'lucide-react';
+import { PosterImage } from './PosterImage';
 
 interface HeroBannerProps {
   featuredItems: MediaItem[];
@@ -157,10 +158,15 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
               className="relative w-full aspect-[16/9] bg-[#141414] border-2 border-[#141414] overflow-hidden shadow-md cursor-pointer group"
               onClick={() => onOpenDetails(current)}
             >
-              <img
-                src={current.backdropUrl}
+              <PosterImage
+                src={current.backdropUrl || current.posterUrl}
                 alt={current.title}
-                className="w-full h-full object-cover film-photo-treatment transition-transform duration-500 group-hover:scale-105"
+                imdbId={current.imdbId}
+                title={current.title}
+                year={current.releaseYear}
+                aspectRatio="16/9"
+                loading="eager"
+                imgClassName="film-photo-treatment transition-transform duration-500 group-hover:scale-105"
               />
 
               {/* Editorial Frame Markings */}

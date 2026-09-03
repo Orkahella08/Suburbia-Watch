@@ -2,19 +2,53 @@ export type MediaType = 'movie' | 'tv';
 
 export type NavTab = 'home' | 'movies' | 'tv' | 'genres' | 'providers' | 'search' | 'watchlist';
 
-export type StreamingProvider =
+export type LegitimateProviderName =
   | 'Netflix'
-  | 'HBO Max'
   | 'Disney+'
+  | 'Prime Video'
+  | 'Max'
+  | 'Apple TV'
+  | 'Paramount+'
   | 'Hulu'
-  | 'Viu'
+  | 'Peacock'
+  | 'YouTube'
+  | 'Google TV';
+
+export type StreamingProvider =
+  | LegitimateProviderName
+  | 'HBO Max'
   | 'Amazon Prime Video'
-  | 'Apple TV+';
+  | 'Apple TV+'
+  | 'Viu';
+
+export interface CountryInfo {
+  code: string; // 'PH', 'US', etc.
+  name: string; // 'Philippines', 'United States', etc.
+  flag: string; // '🇵🇭', '🇺🇸', etc.
+}
+
+export interface StreamingOption {
+  provider: LegitimateProviderName;
+  type: 'subscription' | 'free' | 'rent_or_buy';
+  label: string;
+  officialWatchUrl: string;
+  quality?: string;
+  price?: string;
+  embedUrl?: string;
+  supportsEmbedding?: boolean;
+}
+
+export interface StreamingAvailabilityResult {
+  imdbId: string;
+  countryCode: string;
+  countryName: string;
+  options: StreamingOption[];
+}
 
 export interface CastMember {
   name: string;
   role: string; // Character name
-  avatar: string;
+  avatar?: string;
   bio?: string;
   knownFor?: string[];
 }
@@ -64,6 +98,8 @@ export interface MediaItem {
   country: string;
   streamingProvider: StreamingProvider;
   availableProviders?: StreamingProvider[];
+  countryAvailability?: Record<string, LegitimateProviderName[]>;
+  officialEmbedUrl?: string;
   cast: CastMember[];
   videoUrl: string; // Fallback / preview stream
   seasons?: Season[];

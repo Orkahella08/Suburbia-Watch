@@ -1,6 +1,7 @@
 import React from 'react';
 import { MediaItem } from '../types';
 import { Bookmark, BookmarkCheck, Play, Info, Star } from 'lucide-react';
+import { PosterImage } from './PosterImage';
 
 interface EditorialMovieCardProps {
   item: MediaItem;
@@ -26,14 +27,21 @@ export const EditorialMovieCard: React.FC<EditorialMovieCardProps> = ({
       className="group flex flex-col cursor-pointer select-none"
       onClick={() => onOpenDetails(item)}
     >
-      {/* 2:3 Portrait Artwork Container */}
-      <div className="relative w-full aspect-[2/3] overflow-hidden bg-[#141414] border border-[#141414] shadow-[0_2px_4px_rgba(0,0,0,0.08)] group-hover:shadow-[0_6px_14px_rgba(0,0,0,0.18)] transition-all duration-300">
-        <img
+      {/* 2:3 Portrait Artwork Container with Editorial Ink-Bleed Effect */}
+      <div className="ink-bleed-container relative w-full aspect-[2/3] overflow-hidden bg-[#141414] border border-[#141414] shadow-[0_2px_4px_rgba(0,0,0,0.1)] transition-all duration-300">
+        <PosterImage
           src={item.posterUrl}
           alt={item.title}
-          className="w-full h-full object-cover film-photo-treatment transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+          imdbId={item.imdbId}
+          title={item.title}
+          year={item.releaseYear}
+          aspectRatio="2/3"
           loading="lazy"
+          imgClassName="ink-bleed-image film-photo-treatment"
         />
+
+        {/* Subtle feathered ink absorption fringe on hover */}
+        <div className="ink-bleed-fringe" aria-hidden="true" />
 
         {/* Subtle Archival Tag */}
         {item.neighborhoodBadge && (
@@ -107,8 +115,8 @@ export const EditorialMovieCard: React.FC<EditorialMovieCardProps> = ({
 
         {/* Provider Availability & IMDb Rating */}
         <div className="mt-1 flex items-center justify-between text-[9px] sm:text-[10px] font-mono border-t border-[#141414]/15 pt-1 text-[#57534E]">
-          <span className="uppercase tracking-wider">
-            AVAILABLE ON <strong className="text-[#141414]">{item.streamingProvider.toUpperCase()}</strong>
+          <span className="uppercase tracking-wider font-semibold text-[#141414] truncate max-w-[65%]">
+            {item.streamingProvider || (item.type === 'tv' ? 'SERIES' : 'FEATURE FILM')}
           </span>
           <span className="font-semibold text-[#141414] shrink-0 flex items-center gap-0.5">
             <Star className="w-2.5 h-2.5 fill-current text-[#141414]" />

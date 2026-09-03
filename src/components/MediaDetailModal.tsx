@@ -1,7 +1,12 @@
-import React, { useState, useMemo } from 'react';
-import { MediaItem, Episode } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import { MediaItem, Episode, Season } from '../types';
 import { defaultPlaybackManager } from '../services/playback/PlaybackManager';
-import { X, Play, Bookmark, BookmarkCheck, Share2, Check, Star } from 'lucide-react';
+import { X, Play, Bookmark, BookmarkCheck, Share2, Check, Star, ExternalLink } from 'lucide-react';
+import { PosterImage } from './PosterImage';
+import { WhereToWatch } from './WhereToWatch';
+import { fetchTvSeasonsAndEpisodes } from '../services/imdbService';
+import { extractImdbId } from '../utils/imdb';
+import { DEFAULT_COUNTRY_CODE } from '../services/streamingAvailabilityService';
 
 interface MediaDetailModalProps {
   item: MediaItem | null;
@@ -10,6 +15,8 @@ interface MediaDetailModalProps {
   watchlist: string[];
   onToggleWatchlist: (item: MediaItem) => void;
   onSelectActor?: (actorName: string) => void;
+  countryCode?: string;
+  onSelectCountry?: (countryCode: string) => void;
 }
 
 export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
@@ -19,19 +26,48 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
   watchlist,
   onToggleWatchlist,
   onSelectActor,
+  countryCode = DEFAULT_COUNTRY_CODE,
+  onSelectCountry,
 }) => {
   const [selectedSeasonNumber, setSelectedSeasonNumber] = useState<number>(1);
   const [copiedLink, setCopiedLink] = useState(false);
+  const [tvSeasons, setTvSeasons] = useState<Season[]>(item?.seasons || []);
+  const [loadingEpisodes, setLoadingEpisodes] = useState(false);
+
+  useEffect(() => {
+    if (!item || item.type !== 'tv') {
+      setTvSeasons([]);
+      return;
+    }
+
+    if (item.seasons && item.seasons.length > 0 && item.seasons[0].episodes.length > 0) {
+      setTvSeasons(item.seasons);
+      return;
+    }
+
+    const cleanId = extractImdbId(item.imdbId) || item.id;
+    setLoadingEpisodes(true);
+    fetchTvSeasonsAndEpisodes(cleanId)
+      .then((seasons) => {
+        if (seasons && seasons.length > 0) {
+          setTvSeasons(seasons);
+        }
+      })
+      .finally(() => {
+        setLoadingEpisodes(false);
+      });
+  }, [item]);
 
   if (!item) return null;
 
   const isSaved = watchlist.includes(item.id);
-  const isTV = item.type === 'tv' && Boolean(item.seasons && item.seasons.length > 0);
+  const isTV = item.type === 'tv';
+  const cleanImdb = extractImdbId(item.imdbId) || item.id;
   const currentSeason = isTV
-    ? item.seasons?.find((s) => s.seasonNumber === selectedSeasonNumber) || item.seasons?.[0]
+    ? tvSeasons.find((s) => s.seasonNumber === selectedSeasonNumber) || tvSeasons[0]
     : null;
 
-  const availableProviders = useMemo(() => defaultPlaybackManager.getAvailableProviders(item), [item]);
+  const availableProviders = defaultPlaybackManager.getAvailableProviders(item);
 
   const handleCopyLink = () => {
     navigator.clipboard?.writeText(window.location.href);
@@ -72,15 +108,21 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
         {/* Dedicated Editorial Film Page Layout (Section 17) */}
         <div className="grid grid-cols-1 md:grid-cols-[280px_1fr] lg:grid-cols-[320px_1fr] gap-6 sm:gap-8 items-start mb-8">
           {/* LARGE MOVIE POSTER (2:3 PORTRAIT RATIO) */}
-          <div className="flex flex-col">
-            <div className="w-full aspect-[2/3] bg-[#141414] border-2 border-[#141414] overflow-hidden shadow-lg relative">
-              <img
+          <div className="flex flex-col group">
+            <div className="ink-bleed-container w-full aspect-[2/3] bg-[#141414] border-2 border-[#141414] overflow-hidden shadow-lg relative">
+              <PosterImage
                 src={item.posterUrl}
                 alt={item.title}
-                className="w-full h-full object-cover film-photo-treatment"
+                imdbId={item.imdbId}
+                title={item.title}
+                year={item.releaseYear}
+                aspectRatio="2/3"
+                loading="eager"
+                imgClassName="ink-bleed-image film-photo-treatment"
               />
+              <div className="ink-bleed-fringe" aria-hidden="true" />
               {item.neighborhoodBadge && (
-                <div className="absolute top-2 left-2 bg-[#141414] text-[#FAF9F6] text-[9px] uppercase font-mono tracking-widest px-2 py-0.5 border border-white/20">
+                <div className="absolute top-2 left-2 bg-[#141414] text-[#FAF9F6] text-[9px] uppercase font-mono tracking-widest px-2 py-0.5 border border-white/20 z-10">
                   {item.neighborhoodBadge}
                 </div>
               )}
@@ -225,45 +267,31 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
               </p>
             </div>
 
-            {/* STREAMING SOURCE & PLAYBACK AVAILABILITY (SECTIONS 7, 8, 14, 15) */}
-            <div className="mb-5 bg-[#F4F1EA] border border-[#141414]/30 p-4">
-              <div className="text-[10px] font-mono uppercase tracking-widest text-[#78716C] mb-1.5">
-                STREAMING SOURCE
-              </div>
-              {availableProviders.length > 0 ? (
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center gap-2 bg-[#FAF9F6] border border-[#141414] px-3 py-1.5 text-xs font-mono uppercase text-[#141414] font-bold">
-                    <span className="w-2 h-2 rounded-full bg-emerald-600 animate-pulse" />
-                    <span>{availableProviders[0].getName()}</span>
-                  </div>
-                  <span className="text-[11px] font-mono text-[#57534E]">
-                    Verified in-app stream source
-                  </span>
-                </div>
-              ) : (
-                <div className="text-xs font-mono uppercase text-[#78716C]">
-                  Currently unavailable — No verified playback provider configured for this title
-                </div>
-              )}
+            {/* WHERE TO WATCH / LEGITIMATE STREAMING AVAILABILITY (SECTIONS 2 & 4) */}
+            <div className="mb-6 bg-[#F4F1EA] border-2 border-[#141414] p-4 sm:p-5 shadow-[2px_2px_0px_0px_rgba(20,20,20,1)]">
+              <WhereToWatch
+                media={item}
+                countryCode={countryCode}
+                onSelectCountry={onSelectCountry}
+                showCountrySelector={true}
+                onPlayInApp={() => onPlay(item)}
+              />
             </div>
 
-            {/* PRIMARY ACTION: WATCH NOW BUTTON (SECTION 18) */}
+            {/* PRIMARY ACTION: WATCH NOW BUTTON */}
             <div className="flex flex-wrap items-center gap-3 pt-2">
-              {availableProviders.length > 0 ? (
-                <button
-                  id="modal-watch-now-btn"
-                  type="button"
-                  onClick={() => onPlay(item)}
-                  className="bg-[#141414] text-[#FAF9F6] px-8 py-3.5 text-sm font-condensed uppercase tracking-widest font-bold hover:bg-[#2B2A27] transition-colors flex items-center gap-2.5 cursor-pointer border border-[#141414]"
-                >
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>WATCH NOW</span>
-                </button>
-              ) : (
-                <div className="px-6 py-3.5 text-sm font-condensed uppercase tracking-widest font-bold bg-[#141414]/10 text-[#78716C] border border-[#141414]/20">
-                  CURRENTLY UNAVAILABLE
-                </div>
-              )}
+              <button
+                id="modal-watch-now-btn"
+                type="button"
+                onClick={() => {
+                  onPlay(item);
+                }}
+                className="bg-[#141414] text-[#FAF9F6] px-8 py-3.5 text-sm font-condensed uppercase tracking-widest font-bold hover:bg-[#00A3FF] hover:text-black transition-colors flex items-center gap-2.5 cursor-pointer border border-[#141414] shadow-[3px_3px_0px_0px_rgba(20,20,20,0.3)]"
+                title="Launch video player"
+              >
+                <Play className="w-4 h-4 fill-current" />
+                <span>WATCH NOW</span>
+              </button>
 
               <button
                 type="button"
@@ -296,8 +324,8 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
           </div>
         </div>
 
-        {/* TV SHOW SEASONS & EPISODES BREAKDOWN (SECTIONS 20, 21, 22) */}
-        {isTV && item.seasons && (
+        {/* TV SHOW SEASONS & EPISODES BREAKDOWN (SECTIONS 8 & 20) */}
+        {isTV && (
           <div className="border-t-2 border-[#141414] pt-6 mt-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
               <div>
@@ -305,69 +333,82 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
                   EPISODIC ARCHIVE
                 </h3>
                 <p className="font-serif-editorial text-xs text-[#57534E]">
-                  Select a season chapter to inspect or project.
+                  Verified seasons and broadcast chapters.
                 </p>
               </div>
 
-              {/* Minimalist Season Selector (Section 21) */}
-              <div className="flex items-center gap-2">
-                {item.seasons.map((s) => (
-                  <button
-                    key={s.seasonNumber}
-                    onClick={() => setSelectedSeasonNumber(s.seasonNumber)}
-                    className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider transition-colors cursor-pointer border ${
-                      selectedSeasonNumber === s.seasonNumber
-                        ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] font-bold'
-                        : 'bg-[#F4F1EA] text-[#141414] border-[#141414]/30 hover:border-[#141414]'
-                    }`}
+              {/* Season Selector */}
+              {tvSeasons.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
+                  {tvSeasons.map((s) => (
+                    <button
+                      key={s.seasonNumber}
+                      type="button"
+                      id={`modal-season-tab-${s.seasonNumber}`}
+                      onClick={() => setSelectedSeasonNumber(s.seasonNumber)}
+                      className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider transition-colors cursor-pointer border ${
+                        selectedSeasonNumber === s.seasonNumber
+                          ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] font-bold'
+                          : 'bg-[#F4F1EA] text-[#141414] border-[#141414]/30 hover:border-[#141414]'
+                      }`}
+                    >
+                      SEASON {s.seasonNumber.toString().padStart(2, '0')}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {loadingEpisodes ? (
+              <div className="py-8 text-center text-[#78716C] font-mono text-xs">
+                Retrieving verified episode listings from IMDb...
+              </div>
+            ) : currentSeason && currentSeason.episodes.length > 0 ? (
+              <div className="space-y-3">
+                {currentSeason.episodes.map((ep) => (
+                  <div
+                    key={ep.id}
+                    className="bg-[#F4F1EA] border border-[#141414]/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-[#141414] transition-colors"
                   >
-                    SEASON {s.seasonNumber.toString().padStart(2, '0')}
-                  </button>
+                    <div className="flex items-start gap-4">
+                      <span className="font-mono text-xl font-bold text-[#141414] w-8 shrink-0">
+                        {ep.episodeNumber.toString().padStart(2, '0')}
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-[#78716C] uppercase">
+                          <span>{ep.duration}</span>
+                          {ep.releaseDate && (
+                            <>
+                              <span>•</span>
+                              <span>{ep.releaseDate}</span>
+                            </>
+                          )}
+                        </div>
+                        <h4 className="font-condensed text-lg font-bold uppercase tracking-tight text-[#141414]">
+                          {ep.title}
+                        </h4>
+                        <p className="font-serif-editorial text-xs text-[#57534E] mt-1 max-w-2xl leading-relaxed">
+                          {ep.synopsis}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => onPlay(item, selectedSeasonNumber, ep.id)}
+                      className="bg-[#141414] text-[#FAF9F6] px-4 py-2 text-xs font-condensed uppercase tracking-widest font-bold hover:bg-[#2B2A27] transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center border border-[#141414]"
+                    >
+                      <Play className="w-3 h-3 fill-current" />
+                      <span>WATCH</span>
+                    </button>
+                  </div>
                 ))}
               </div>
-            </div>
-
-            {/* Episode List (Section 22) */}
-            <div className="space-y-3">
-              {currentSeason?.episodes.map((ep) => (
-                <div
-                  key={ep.id}
-                  className="bg-[#F4F1EA] border border-[#141414]/30 p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 hover:border-[#141414] transition-colors"
-                >
-                  <div className="flex items-start gap-4">
-                    <span className="font-mono text-xl font-bold text-[#141414] w-8 shrink-0">
-                      {ep.episodeNumber.toString().padStart(2, '0')}
-                    </span>
-                    <div>
-                      <div className="flex items-center gap-2 text-[10px] font-mono text-[#78716C] uppercase">
-                        <span>{ep.duration}</span>
-                        {ep.releaseDate && (
-                          <>
-                            <span>•</span>
-                            <span>{ep.releaseDate}</span>
-                          </>
-                        )}
-                      </div>
-                      <h4 className="font-condensed text-lg font-bold uppercase tracking-tight text-[#141414]">
-                        {ep.title}
-                      </h4>
-                      <p className="font-serif-editorial text-xs text-[#57534E] mt-1 max-w-2xl leading-relaxed">
-                        {ep.synopsis}
-                      </p>
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => onPlay(item, selectedSeasonNumber, ep.id)}
-                    className="bg-[#141414] text-[#FAF9F6] px-4 py-2 text-xs font-condensed uppercase tracking-widest font-bold hover:bg-[#2B2A27] transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 self-start sm:self-center border border-[#141414]"
-                  >
-                    <Play className="w-3 h-3 fill-current" />
-                    <span>WATCH</span>
-                  </button>
-                </div>
-              ))}
-            </div>
+            ) : (
+              <div className="py-6 text-center text-[#78716C] font-mono text-xs bg-[#F4F1EA] border border-[#141414]/20">
+                Single season / serial edition available for instant projection.
+              </div>
+            )}
           </div>
         )}
       </div>
