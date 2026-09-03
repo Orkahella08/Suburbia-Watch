@@ -113,6 +113,139 @@ export default defineConfig(() => {
                   return;
                 }
 
+                // Handle TV series full seasons and episodes lookup: /api/tv-episodes?id=tt...&title=...
+                if (req.url.startsWith('/api/tv-episodes')) {
+                  const rawId = urlObj.searchParams.get('id') || '';
+                  const title = urlObj.searchParams.get('title') || '';
+                  const match = (rawId || '').match(/tt\d{7,10}/i);
+                  const cleanId = match ? match[0].toLowerCase() : '';
+
+                  const cacheKey = `episodes:${cleanId || title.toLowerCase()}`;
+                  if (cache.has(cacheKey)) {
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.end(JSON.stringify(cache.get(cacheKey)));
+                    return;
+                  }
+
+                  let showId: number | null = null;
+
+                  // 1. Try lookup by IMDb ID
+                  if (cleanId) {
+                    try {
+                      const showRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${cleanId}`, {
+                        redirect: 'follow',
+                        headers: { 'Accept': 'application/json' },
+                      });
+                      if (showRes.ok) {
+                        const showData = (await showRes.json()) as any;
+                        if (showData && showData.id) {
+                          showId = showData.id;
+                        }
+                      }
+                    } catch (e) {
+                      console.warn('TVMaze lookup error by IMDb:', e);
+                    }
+                  }
+
+                  // 2. Fallback to title search if IMDb lookup failed
+                  if (!showId && title) {
+                    try {
+                      const searchRes = await fetch(`https://api.tvmaze.com/singlesearch/shows?q=${encodeURIComponent(title)}`, {
+                        headers: { 'Accept': 'application/json' },
+                      });
+                      if (searchRes.ok) {
+                        const searchData = (await searchRes.json()) as any;
+                        if (searchData && searchData.id) {
+                          showId = searchData.id;
+                        }
+                      }
+                    } catch (e) {
+                      console.warn('TVMaze search error by title:', e);
+                    }
+                  }
+
+                  if (!showId) {
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.end(JSON.stringify({ ok: false, seasons: [] }));
+                    return;
+                  }
+
+                  // 3. Fetch all episodes for this show
+                  try {
+                    const epRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`, {
+                      headers: { 'Accept': 'application/json' },
+                    });
+                    if (!epRes.ok) {
+                      res.statusCode = 200;
+                      res.setHeader('Content-Type', 'application/json');
+                      res.setHeader('Access-Control-Allow-Origin', '*');
+                      res.end(JSON.stringify({ ok: false, seasons: [] }));
+                      return;
+                    }
+
+                    const rawEpisodes = (await epRes.json()) as any[];
+                    if (!Array.isArray(rawEpisodes)) {
+                      res.statusCode = 200;
+                      res.setHeader('Content-Type', 'application/json');
+                      res.setHeader('Access-Control-Allow-Origin', '*');
+                      res.end(JSON.stringify({ ok: false, seasons: [] }));
+                      return;
+                    }
+
+                    // Group episodes by season
+                    const seasonsMap = new Map<number, any[]>();
+                    for (const ep of rawEpisodes) {
+                      const sNum = ep.season || 1;
+                      const cleanSummary = (ep.summary || '').replace(/<\/?[^>]+(>|$)/g, '').trim();
+                      const epObj = {
+                        id: `${cleanId || 'tv'}-s${sNum}e${ep.number || 1}`,
+                        imdbId: cleanId,
+                        episodeNumber: ep.number || 1,
+                        seasonNumber: sNum,
+                        title: ep.name || `Episode ${ep.number}`,
+                        duration: ep.runtime ? `${ep.runtime}m` : '50m',
+                        durationSeconds: (ep.runtime || 50) * 60,
+                        synopsis: cleanSummary || `Season ${sNum}, Episode ${ep.number || 1}.`,
+                        releaseDate: ep.airdate || '',
+                        thumbnailUrl: ep.image?.original || ep.image?.medium || '',
+                        videoUrl: '',
+                      };
+
+                      if (!seasonsMap.has(sNum)) {
+                        seasonsMap.set(sNum, []);
+                      }
+                      seasonsMap.get(sNum)!.push(epObj);
+                    }
+
+                    const seasons = Array.from(seasonsMap.entries())
+                      .sort(([a], [b]) => a - b)
+                      .map(([seasonNum, episodes]) => ({
+                        seasonNumber: seasonNum,
+                        title: `Season ${seasonNum}`,
+                        episodes: episodes.sort((a, b) => a.episodeNumber - b.episodeNumber),
+                      }));
+
+                    const payload = { ok: true, seasons };
+                    cache.set(cacheKey, payload);
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.end(JSON.stringify(payload));
+                    return;
+                  } catch (err) {
+                    console.warn('Error fetching episodes list:', err);
+                    res.statusCode = 200;
+                    res.setHeader('Content-Type', 'application/json');
+                    res.setHeader('Access-Control-Allow-Origin', '*');
+                    res.end(JSON.stringify({ ok: false, seasons: [] }));
+                    return;
+                  }
+                }
+
                 // Handle direct IMDb ID title lookup: /api/imdb-title?id=tt1234567
                 if (req.url.startsWith('/api/imdb-title')) {
                   const rawId = urlObj.searchParams.get('id') || '';

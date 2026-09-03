@@ -1,5 +1,7 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 @layer base {
   :root {
     --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
@@ -12,12 +14,23 @@
     --ink-faint: #857F77;
     --rule-border: rgba(20, 20, 20, 0.18);
   }
+
+  :root.dark, html.dark, body.dark {
+    --paper-bg: #0F0F10;
+    --ink-black: #F4F4F5;
+    --ink-muted: #A1A1AA;
+    --ink-faint: #71717A;
+    --rule-border: rgba(244, 244, 245, 0.18);
+    background-color: #0F0F10;
+    color: #F4F4F5;
+  }
   
   body {
     font-family: var(--font-sans);
-    background-color: #E8E5DC;
-    color: #141414;
+    background-color: var(--paper-bg);
+    color: var(--ink-black);
     overflow-x: hidden;
+    transition: background-color 0.2s ease, color 0.2s ease;
   }
 
   h1, h2, h3, .font-condensed {
@@ -67,6 +80,17 @@
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #141414;
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: #0F0F10;
+  border-left: 1px solid rgba(244, 244, 245, 0.15);
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #3F3F46;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #71717A;
 }
 
 .no-scrollbar::-webkit-scrollbar {

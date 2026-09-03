@@ -222,24 +222,59 @@ export function transformImdbResultToMedia(item: ImdbSearchResultItem): MediaIte
 const tvSeasonsCache = new Map<string, Season[]>();
 
 /**
- * Fetches verified real TV series seasons and episodes by IMDb ID.
+ * Fetches verified real TV series seasons and episodes by IMDb ID or title.
  * Returns actual episodes with names, air dates, summaries, runtimes, and thumbnails.
  */
-export async function fetchTvSeasonsAndEpisodes(imdbId: string): Promise<Season[]> {
-  const cleanId = extractImdbId(imdbId);
-  if (!cleanId) return [];
+export async function fetchTvSeasonsAndEpisodes(imdbId: string, showTitle?: string): Promise<Season[]> {
+  const cleanId = extractImdbId(imdbId) || (imdbId && imdbId.startsWith('tt') ? imdbId.toLowerCase() : '');
+  const cacheKey = cleanId || (showTitle ? showTitle.toLowerCase() : '');
+  if (!cacheKey) return [];
 
-  if (tvSeasonsCache.has(cleanId)) {
-    return tvSeasonsCache.get(cleanId)!;
+  if (tvSeasonsCache.has(cacheKey)) {
+    return tvSeasonsCache.get(cacheKey)!;
   }
 
+  // 1. Try local server-side API bridge
   try {
-    const showRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${cleanId}`);
-    if (!showRes.ok) return [];
-    const show = await showRes.json();
-    if (!show || !show.id) return [];
+    const q = new URLSearchParams();
+    if (cleanId) q.set('id', cleanId);
+    if (showTitle) q.set('title', showTitle);
 
-    const epRes = await fetch(`https://api.tvmaze.com/shows/${show.id}/episodes`);
+    const apiRes = await fetch(`/api/tv-episodes?${q.toString()}`);
+    if (apiRes.ok) {
+      const data = (await apiRes.json()) as any;
+      if (data && data.ok && Array.isArray(data.seasons) && data.seasons.length > 0) {
+        tvSeasonsCache.set(cacheKey, data.seasons);
+        if (cleanId && cacheKey !== cleanId) tvSeasonsCache.set(cleanId, data.seasons);
+        return data.seasons;
+      }
+    }
+  } catch (err) {
+    console.warn('API /api/tv-episodes attempt failed, trying direct TVMaze:', err);
+  }
+
+  // 2. Direct client fallback to TVMaze
+  try {
+    let showId: number | null = null;
+    if (cleanId) {
+      const showRes = await fetch(`https://api.tvmaze.com/lookup/shows?imdb=${cleanId}`, { redirect: 'follow' });
+      if (showRes.ok) {
+        const show = await showRes.json();
+        if (show && show.id) showId = show.id;
+      }
+    }
+
+    if (!showId && showTitle) {
+      const showRes = await fetch(`https://api.tvmaze.com/singlesearch/shows?q=${encodeURIComponent(showTitle)}`);
+      if (showRes.ok) {
+        const show = await showRes.json();
+        if (show && show.id) showId = show.id;
+      }
+    }
+
+    if (!showId) return [];
+
+    const epRes = await fetch(`https://api.tvmaze.com/shows/${showId}/episodes`);
     if (!epRes.ok) return [];
     const rawEpisodes = await epRes.json();
     if (!Array.isArray(rawEpisodes) || rawEpisodes.length === 0) return [];
@@ -250,7 +285,7 @@ export async function fetchTvSeasonsAndEpisodes(imdbId: string): Promise<Season[
       const sNum = ep.season || 1;
       const cleanSummary = (ep.summary || '').replace(/<\/?[^>]+(>|$)/g, '').trim();
       const epObj: Episode = {
-        id: `${cleanId}-s${sNum}e${ep.number || 1}`,
+        id: `${cleanId || 'tv'}-s${sNum}e${ep.number || 1}`,
         imdbId: cleanId,
         episodeNumber: ep.number || 1,
         seasonNumber: sNum,
@@ -277,10 +312,11 @@ export async function fetchTvSeasonsAndEpisodes(imdbId: string): Promise<Season[
         episodes: episodes.sort((a, b) => a.episodeNumber - b.episodeNumber),
       }));
 
-    tvSeasonsCache.set(cleanId, seasons);
+    tvSeasonsCache.set(cacheKey, seasons);
+    if (cleanId && cacheKey !== cleanId) tvSeasonsCache.set(cleanId, seasons);
     return seasons;
   } catch (err) {
-    console.warn('Could not fetch real TV episodes from TVMaze:', err);
+    console.warn('Could not fetch real TV episodes from TVMaze fallback:', err);
     return [];
   }
 }

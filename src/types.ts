@@ -1,6 +1,14 @@
 export type MediaType = 'movie' | 'tv';
 
-export type NavTab = 'home' | 'movies' | 'tv' | 'genres' | 'providers' | 'search' | 'watchlist';
+export type NavTab =
+  | 'home'
+  | 'movies'
+  | 'tv'
+  | 'genres'
+  | 'providers'
+  | 'search'
+  | 'watchlist'
+  | 'marvel';
 
 export type LegitimateProviderName =
   | 'Netflix'
@@ -12,14 +20,18 @@ export type LegitimateProviderName =
   | 'Hulu'
   | 'Peacock'
   | 'YouTube'
-  | 'Google TV';
+  | 'Google TV'
+  | 'Crunchyroll'
+  | 'Bilibili';
 
 export type StreamingProvider =
   | LegitimateProviderName
   | 'HBO Max'
   | 'Amazon Prime Video'
   | 'Apple TV+'
-  | 'Viu';
+  | 'Viu'
+  | 'Crunchyroll'
+  | 'Bilibili';
 
 export interface CountryInfo {
   code: string; // 'PH', 'US', etc.
@@ -125,3 +137,18 @@ export interface WatchProgress {
   formattedTime?: string;
   updatedAt: number;
 }
+
+export type MarvelOrderMode = 'story' | 'chronological';
+
+export interface MarvelItem extends MediaItem {
+  chronologicalOrder: number;
+  chronologicalYear: string;
+  timelinePeriod: string;
+  storyPhase: 'Phase 1' | 'Phase 2' | 'Phase 3' | 'Phase 4' | 'Phase 5' | 'Phase 6' | 'Special Presentation';
+  storyOrder: number;
+  saga: 'The Infinity Saga' | 'The Multiverse Saga';
+  isLatestRelease?: boolean;
+  isUpcoming?: boolean;
+  upcomingDate?: string;
+}
+

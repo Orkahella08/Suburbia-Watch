@@ -85,6 +85,26 @@ export const POPULAR_PLATFORMS: PlatformConfig[] = [
     borderColor: '#52525B',
     description: 'Critically acclaimed auteur filmmaking, celebrated sci-fi & comedy.',
   },
+  {
+    id: 'crunchyroll',
+    name: 'Crunchyroll',
+    shortName: 'Crunchyroll',
+    badge: 'CR',
+    brandColor: '#F47521',
+    accentBg: '#F47521',
+    borderColor: '#EA580C',
+    description: 'World’s premier anime destination featuring simulcasts, shonen epics & movies.',
+  },
+  {
+    id: 'bilibili',
+    name: 'Bilibili',
+    shortName: 'Bili Bili',
+    badge: 'BILI',
+    brandColor: '#00A1D6',
+    accentBg: '#00A1D6',
+    borderColor: '#0284C7',
+    description: 'Leading East Asian animation powerhouse with top-rated donghua & fantasy sagas.',
+  },
 ];
 
 const AVAILABLE_GENRES = [
@@ -116,10 +136,37 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
   const [selectedPlatform, setSelectedPlatform] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<'all' | 'movie' | 'tv'>('all');
   const [selectedGenre, setSelectedGenre] = useState<string>('All Genres');
+  const [minImdbRating, setMinImdbRating] = useState<number>(0);
+  const [sortBy, setSortBy] = useState<'imdb' | 'popular' | 'newest'>('imdb');
 
-  // Filtered in-demand / popular items
+  // Compute platform highest IMDb rating for badges
+  const platformTopRatings = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of POPULAR_PLATFORMS) {
+      let maxRating = 0;
+      for (const item of items) {
+        const matchPrimary =
+          item.streamingProvider?.toLowerCase().includes(p.shortName.toLowerCase()) ||
+          item.streamingProvider?.toLowerCase().includes(p.name.toLowerCase());
+        const matchAvailable = item.availableProviders?.some(
+          (prov) =>
+            prov.toLowerCase().includes(p.shortName.toLowerCase()) ||
+            prov.toLowerCase().includes(p.name.toLowerCase())
+        );
+        if (matchPrimary || matchAvailable) {
+          if (item.imdbRating && item.imdbRating > maxRating) {
+            maxRating = item.imdbRating;
+          }
+        }
+      }
+      map.set(p.id, maxRating);
+    }
+    return map;
+  }, [items]);
+
+  // Filtered and sorted in-demand / popular items
   const filteredItems = useMemo(() => {
-    return items.filter((item) => {
+    const result = items.filter((item) => {
       // 1. In-demand / popular criteria
       const isInDemand =
         item.popular ||
@@ -133,7 +180,14 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
         return false;
       }
 
-      // 2. Platform match
+      // 2. Minimum IMDb rating filter
+      if (minImdbRating > 0) {
+        if (!item.imdbRating || item.imdbRating < minImdbRating) {
+          return false;
+        }
+      }
+
+      // 3. Platform match
       if (selectedPlatform !== 'all') {
         const platformCfg = POPULAR_PLATFORMS.find((p) => p.id === selectedPlatform);
         if (platformCfg) {
@@ -152,14 +206,14 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
         }
       }
 
-      // 3. Format / Type match (Movies vs Series)
+      // 4. Format / Type match (Movies vs Series)
       if (selectedType !== 'all') {
         if (item.type !== selectedType) {
           return false;
         }
       }
 
-      // 4. Genre match
+      // 5. Genre match
       if (selectedGenre !== 'All Genres') {
         const hasGenre = item.genres?.some(
           (g) => g.toLowerCase() === selectedGenre.toLowerCase()
@@ -171,12 +225,28 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
 
       return true;
     });
-  }, [items, selectedPlatform, selectedType, selectedGenre]);
+
+    // Sort items
+    return result.sort((a, b) => {
+      if (sortBy === 'imdb') {
+        return (b.imdbRating || 0) - (a.imdbRating || 0);
+      }
+      if (sortBy === 'popular') {
+        return (b.communityRating || 0) - (a.communityRating || 0);
+      }
+      if (sortBy === 'newest') {
+        return (b.releaseYear || 0) - (a.releaseYear || 0);
+      }
+      return 0;
+    });
+  }, [items, selectedPlatform, selectedType, selectedGenre, minImdbRating, sortBy]);
 
   const handleResetFilters = () => {
     setSelectedPlatform('all');
     setSelectedType('all');
     setSelectedGenre('All Genres');
+    setMinImdbRating(0);
+    setSortBy('imdb');
   };
 
   const activePlatformConfig = POPULAR_PLATFORMS.find((p) => p.id === selectedPlatform);
@@ -184,66 +254,63 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
   return (
     <section
       id="streaming-platform-explorer"
-      className="mb-14 bg-[#FAF9F6] border-2 border-[#141414] p-5 sm:p-8 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)]"
+      className="mb-14 bg-[#FAF9F6] dark:bg-[#18181B] border-2 border-[#141414] dark:border-[#27272A] p-5 sm:p-8 shadow-[4px_4px_0px_0px_rgba(20,20,20,1)] dark:shadow-[4px_4px_0px_0px_rgba(0,0,0,0.5)] transition-colors duration-200"
     >
       {/* Section Header */}
-      <div className="flex flex-col lg:flex-row lg:items-end justify-between border-b-2 border-[#141414] pb-4 mb-6 gap-3">
+      <div className="flex flex-col lg:flex-row lg:items-end justify-between border-b-2 border-[#141414] dark:border-[#27272A] pb-4 mb-6 gap-3">
         <div>
-          <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-[#78716C] mb-1">
+          <div className="flex items-center gap-2 text-[10px] font-mono uppercase tracking-widest text-[#78716C] dark:text-[#A1A1AA] mb-1">
             <Flame className="w-3.5 h-3.5 text-[#E50914]" />
-            <span>POPULAR & IN-DEMAND TITLES</span>
+            <span>TOP IMDb RATINGS & POPULAR TITLES</span>
           </div>
-          <h2 className="font-condensed text-3xl sm:text-4xl font-bold uppercase tracking-tight text-[#141414]">
+          <h2 className="font-condensed text-3xl sm:text-4xl font-bold uppercase tracking-tight text-[#141414] dark:text-[#F4F4F5]">
             EXPLORE BY STREAMING PLATFORM
           </h2>
-          <p className="font-serif-editorial text-sm text-[#57534E] mt-1 max-w-2xl">
-            Select a platform to browse trending, audience-favorite movies and series. Every title is verified and streams directly in our high-definition player.
+          <p className="font-serif-editorial text-sm text-[#57534E] dark:text-[#A1A1AA] mt-1 max-w-2xl">
+            Filter by network, format, or highest IMDb rating. Discover world-class television sagas and cinematic masterpieces streaming seamlessly in HD.
           </p>
         </div>
 
         {/* Active Filters Summary Badge */}
-        <div className="flex items-center gap-2 self-start lg:self-auto">
-          {(selectedPlatform !== 'all' || selectedType !== 'all' || selectedGenre !== 'All Genres') && (
+        <div className="flex items-center gap-2 self-start lg:self-auto flex-wrap">
+          {(selectedPlatform !== 'all' || selectedType !== 'all' || selectedGenre !== 'All Genres' || minImdbRating > 0) && (
             <button
               type="button"
               onClick={handleResetFilters}
-              className="px-3 py-1.5 bg-[#F4F1EA] hover:bg-[#141414] hover:text-[#FAF9F6] border border-[#141414] text-xs font-mono uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer shadow-[1px_1px_0px_0px_rgba(20,20,20,1)]"
+              className="px-3 py-1.5 bg-[#F4F1EA] dark:bg-[#27272A] hover:bg-[#141414] hover:text-[#FAF9F6] dark:hover:bg-[#F4F4F5] dark:hover:text-[#141414] border border-[#141414] dark:border-[#3F3F46] text-xs font-mono uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer shadow-[1px_1px_0px_0px_rgba(20,20,20,1)]"
               title="Reset all filter selections"
             >
               <RefreshCcw className="w-3 h-3" />
               <span>RESET FILTERS</span>
             </button>
           )}
-          <span className="font-mono text-xs text-[#57534E] uppercase bg-[#F4F1EA] px-2.5 py-1.5 border border-[#141414]/20 font-bold">
-            {filteredItems.length} {filteredItems.length === 1 ? 'TITLE' : 'TITLES'} FOUND
-          </span>
         </div>
       </div>
 
       {/* 1. STREAMING PLATFORMS SELECTOR */}
       <div className="mb-6">
-        <div className="text-[11px] font-mono uppercase tracking-wider text-[#78716C] mb-2.5 flex items-center justify-between">
+        <div className="text-[11px] font-mono uppercase tracking-wider text-[#78716C] dark:text-[#A1A1AA] mb-2.5 flex items-center justify-between">
           <span>SELECT STREAMING NETWORK:</span>
           {activePlatformConfig && (
-            <span className="text-[#141414] font-bold">
+            <span className="text-[#141414] dark:text-[#F4F4F5] font-bold">
               FILTERED BY {activePlatformConfig.name.toUpperCase()}
             </span>
           )}
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-2.5 sm:gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 lg:grid-cols-9 gap-2.5 sm:gap-3">
           {/* ALL PLATFORMS BUTTON */}
           <button
             type="button"
             onClick={() => setSelectedPlatform('all')}
             className={`p-3 text-left border-2 transition-all cursor-pointer flex flex-col justify-between min-h-[90px] relative group ${
               selectedPlatform === 'all'
-                ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] shadow-[3px_3px_0px_0px_rgba(20,20,20,1)] -translate-y-0.5'
-                : 'bg-[#F4F1EA] text-[#141414] border-[#141414]/30 hover:border-[#141414] hover:bg-white'
+                ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] dark:bg-[#F4F4F5] dark:text-[#141414] dark:border-[#F4F4F5] shadow-[3px_3px_0px_0px_rgba(20,20,20,1)] -translate-y-0.5'
+                : 'bg-[#F4F1EA] dark:bg-[#27272A] text-[#141414] dark:text-[#F4F4F5] border-[#141414]/30 dark:border-[#3F3F46] hover:border-[#141414] dark:hover:border-[#00A3FF] hover:bg-white dark:hover:bg-[#3F3F46]'
             }`}
           >
             {selectedPlatform === 'all' && (
-              <div className="absolute top-2 right-2 text-[9px] font-mono flex items-center gap-0.5 bg-[#FAF9F6] text-[#141414] px-1 py-0.5 font-bold">
+              <div className="absolute top-2 right-2 text-[9px] font-mono flex items-center gap-0.5 bg-[#FAF9F6] dark:bg-[#141414] text-[#141414] dark:text-[#FAF9F6] px-1 py-0.5 font-bold">
                 <Check className="w-2.5 h-2.5" />
                 <span>ALL</span>
               </div>
@@ -255,8 +322,8 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
               <div className="font-condensed font-bold text-sm sm:text-base uppercase tracking-wider">
                 All Networks
               </div>
-              <div className="text-[9px] font-mono text-[#78716C] group-hover:text-current mt-0.5 uppercase">
-                All Popular Prints
+              <div className="text-[9px] font-mono text-[#78716C] dark:text-[#A1A1AA] group-hover:text-current mt-0.5 uppercase">
+                Up to 9.5 ★ IMDb
               </div>
             </div>
           </button>
@@ -264,6 +331,7 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
           {/* INDIVIDUAL PLATFORMS */}
           {POPULAR_PLATFORMS.map((platform) => {
             const isSelected = selectedPlatform === platform.id;
+            const topRating = platformTopRatings.get(platform.id) || 0;
             return (
               <button
                 key={platform.id}
@@ -271,12 +339,12 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
                 onClick={() => setSelectedPlatform(isSelected ? 'all' : platform.id)}
                 className={`p-3 text-left border-2 transition-all cursor-pointer flex flex-col justify-between min-h-[90px] relative group ${
                   isSelected
-                    ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] shadow-[3px_3px_0px_0px_rgba(20,20,20,1)] -translate-y-0.5'
-                    : 'bg-[#F4F1EA] text-[#141414] border-[#141414]/30 hover:border-[#141414] hover:bg-white'
+                    ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] dark:bg-[#F4F4F5] dark:text-[#141414] dark:border-[#F4F4F5] shadow-[3px_3px_0px_0px_rgba(20,20,20,1)] -translate-y-0.5'
+                    : 'bg-[#F4F1EA] dark:bg-[#27272A] text-[#141414] dark:text-[#F4F4F5] border-[#141414]/30 dark:border-[#3F3F46] hover:border-[#141414] dark:hover:border-[#00A3FF] hover:bg-white dark:hover:bg-[#3F3F46]'
                 }`}
               >
                 {isSelected && (
-                  <div className="absolute top-2 right-2 text-[9px] font-mono flex items-center gap-0.5 bg-[#FAF9F6] text-[#141414] px-1 py-0.5 font-bold">
+                  <div className="absolute top-2 right-2 text-[9px] font-mono flex items-center gap-0.5 bg-[#FAF9F6] dark:bg-[#141414] text-[#141414] dark:text-[#FAF9F6] px-1 py-0.5 font-bold">
                     <Check className="w-2.5 h-2.5" />
                     <span>ON</span>
                   </div>
@@ -294,8 +362,8 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
                   <div className="font-condensed font-bold text-sm sm:text-base uppercase tracking-wider truncate">
                     {platform.shortName}
                   </div>
-                  <div className="text-[9px] font-mono text-[#78716C] group-hover:text-current mt-0.5 uppercase truncate">
-                    Popular In-Demand
+                  <div className="text-[9px] font-mono text-[#78716C] dark:text-[#A1A1AA] group-hover:text-current mt-0.5 uppercase truncate">
+                    {topRating > 0 ? `★ ${topRating.toFixed(1)} IMDb` : 'Top IMDb'}
                   </div>
                 </div>
               </button>
@@ -304,24 +372,25 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
         </div>
       </div>
 
-      {/* 2. GENERAL FORMAT FILTER (MOVIES OR SERIES) & GENRE FILTER */}
-      <div className="bg-[#F4F1EA] border border-[#141414]/25 p-4 mb-8 space-y-4">
-        {/* Format Selector: All vs Movies vs Series */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-[#141414]/15 pb-3">
-          <div className="flex items-center gap-2">
-            <Film className="w-4 h-4 text-[#141414]" />
-            <span className="font-condensed font-bold text-xs uppercase tracking-wider text-[#141414]">
-              FORMAT FILTER:
-            </span>
-          </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
+      {/* 2. GENERAL FORMAT, IMDb RATINGS & SORTING */}
+      <div className="bg-[#F4F1EA] dark:bg-[#202023] border border-[#141414]/25 dark:border-[#27272A] p-4 mb-8 space-y-3.5">
+        {/* Top Filter Bar: Format & IMDb Rating Tiers */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-[#141414]/15 dark:border-[#27272A] pb-3">
+          {/* Format Selector */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 mr-1 text-[#141414] dark:text-[#F4F4F5]">
+              <Film className="w-3.5 h-3.5" />
+              <span className="font-condensed font-bold text-xs uppercase tracking-wider">
+                FORMAT:
+              </span>
+            </div>
             <button
               type="button"
               onClick={() => setSelectedType('all')}
-              className={`px-3 py-1 text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer border ${
+              className={`px-2.5 py-1 text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer border ${
                 selectedType === 'all'
-                  ? 'bg-[#141414] text-[#FAF9F6] border-[#141414]'
-                  : 'bg-[#FAF9F6] text-[#141414] border-[#141414]/30 hover:border-[#141414]'
+                  ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] dark:bg-[#F4F4F5] dark:text-[#141414]'
+                  : 'bg-[#FAF9F6] dark:bg-[#27272A] text-[#141414] dark:text-[#F4F4F5] border-[#141414]/30 dark:border-[#3F3F46]'
               }`}
             >
               ALL FORMATS
@@ -329,36 +398,78 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
             <button
               type="button"
               onClick={() => setSelectedType('movie')}
-              className={`px-3 py-1 text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer border flex items-center gap-1 ${
+              className={`px-2.5 py-1 text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer border flex items-center gap-1 ${
                 selectedType === 'movie'
-                  ? 'bg-[#141414] text-[#FAF9F6] border-[#141414]'
-                  : 'bg-[#FAF9F6] text-[#141414] border-[#141414]/30 hover:border-[#141414]'
+                  ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] dark:bg-[#F4F4F5] dark:text-[#141414]'
+                  : 'bg-[#FAF9F6] dark:bg-[#27272A] text-[#141414] dark:text-[#F4F4F5] border-[#141414]/30 dark:border-[#3F3F46]'
               }`}
             >
               <Film className="w-3 h-3" />
-              <span>MOVIES (FEATURE FILMS)</span>
+              <span>MOVIES</span>
             </button>
             <button
               type="button"
               onClick={() => setSelectedType('tv')}
-              className={`px-3 py-1 text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer border flex items-center gap-1 ${
+              className={`px-2.5 py-1 text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer border flex items-center gap-1 ${
                 selectedType === 'tv'
-                  ? 'bg-[#141414] text-[#FAF9F6] border-[#141414]'
-                  : 'bg-[#FAF9F6] text-[#141414] border-[#141414]/30 hover:border-[#141414]'
+                  ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] dark:bg-[#F4F4F5] dark:text-[#141414]'
+                  : 'bg-[#FAF9F6] dark:bg-[#27272A] text-[#141414] dark:text-[#F4F4F5] border-[#141414]/30 dark:border-[#3F3F46]'
               }`}
             >
               <Tv className="w-3 h-3" />
-              <span>SERIES (TV SHOWS)</span>
+              <span>SERIES</span>
             </button>
+          </div>
+
+          {/* Top IMDb Rating Selector */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-condensed font-bold text-xs uppercase tracking-wider text-[#141414] dark:text-[#F4F4F5] flex items-center gap-1">
+              <span>★ IMDb SCORE:</span>
+            </span>
+            {[
+              { label: 'ALL IN-DEMAND', min: 0 },
+              { label: '★ 8.0+ RATED', min: 8.0 },
+              { label: '★ 8.5+ RATED', min: 8.5 },
+              { label: '★ 9.0+ MASTERPIECES', min: 9.0 },
+            ].map((tier) => (
+              <button
+                key={tier.min}
+                type="button"
+                onClick={() => setMinImdbRating(tier.min)}
+                className={`px-2.5 py-1 text-xs font-mono uppercase tracking-wider transition-colors cursor-pointer border ${
+                  minImdbRating === tier.min
+                    ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] dark:bg-[#F4F4F5] dark:text-[#141414] font-bold'
+                    : 'bg-[#FAF9F6] dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA] border-[#141414]/20 dark:border-[#3F3F46] hover:border-[#141414] hover:text-[#141414] dark:hover:text-[#F4F4F5]'
+                }`}
+              >
+                {tier.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Sort Selector */}
+          <div className="flex items-center gap-2">
+            <span className="font-condensed font-bold text-xs uppercase tracking-wider text-[#141414] dark:text-[#F4F4F5]">
+              SORT:
+            </span>
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="bg-[#FAF9F6] dark:bg-[#27272A] text-[#141414] dark:text-[#F4F4F5] border border-[#141414]/30 dark:border-[#3F3F46] font-mono text-xs px-2 py-1 outline-none cursor-pointer"
+            >
+              <option value="imdb">IMDb Rating (Highest)</option>
+              <option value="popular">Popularity / Audience</option>
+              <option value="newest">Release Year (Newest)</option>
+            </select>
           </div>
         </div>
 
         {/* Genre Selector */}
         <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-2.5">
           <div className="flex items-center gap-2 shrink-0 pt-1">
-            <Sparkles className="w-4 h-4 text-[#141414]" />
-            <span className="font-condensed font-bold text-xs uppercase tracking-wider text-[#141414]">
-              SELECTION OF GENRE:
+            <Sparkles className="w-3.5 h-3.5 text-[#141414] dark:text-[#F4F4F5]" />
+            <span className="font-condensed font-bold text-xs uppercase tracking-wider text-[#141414] dark:text-[#F4F4F5]">
+              GENRE:
             </span>
           </div>
 
@@ -372,8 +483,8 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
                   onClick={() => setSelectedGenre(genre)}
                   className={`px-2.5 py-1 text-xs font-mono uppercase tracking-wider transition-colors cursor-pointer border ${
                     isSelected
-                      ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] font-bold'
-                      : 'bg-[#FAF9F6] text-[#57534E] border-[#141414]/20 hover:border-[#141414] hover:text-[#141414]'
+                      ? 'bg-[#141414] text-[#FAF9F6] border-[#141414] dark:bg-[#F4F4F5] dark:text-[#141414] font-bold'
+                      : 'bg-[#FAF9F6] dark:bg-[#27272A] text-[#57534E] dark:text-[#A1A1AA] border-[#141414]/20 dark:border-[#3F3F46] hover:border-[#141414] hover:text-[#141414] dark:hover:text-[#F4F4F5]'
                   }`}
                 >
                   {genre}
@@ -386,44 +497,52 @@ export const StreamingPlatformExplorer: React.FC<PlatformExplorerProps> = ({
 
       {/* 3. FILTERED RESULTS GRID */}
       <div>
-        <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#141414]/15">
-          <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-[#57534E]">
-            <span>FILTERED RESULTS:</span>
-            <span className="font-bold text-[#141414] bg-[#F4F1EA] px-2 py-0.5 border border-[#141414]/30">
+        <div className="flex items-center justify-between mb-4 pb-2 border-b border-[#141414]/15 dark:border-[#27272A]">
+          <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-[#57534E] dark:text-[#A1A1AA]">
+            <span>RESULTS:</span>
+            <span className="font-bold text-[#141414] dark:text-[#F4F4F5] bg-[#F4F1EA] dark:bg-[#27272A] px-2 py-0.5 border border-[#141414]/30 dark:border-[#3F3F46]">
               {activePlatformConfig ? activePlatformConfig.name.toUpperCase() : 'ALL NETWORKS'}
             </span>
             <span>·</span>
-            <span className="font-bold text-[#141414] bg-[#F4F1EA] px-2 py-0.5 border border-[#141414]/30">
+            <span className="font-bold text-[#141414] dark:text-[#F4F4F5] bg-[#F4F1EA] dark:bg-[#27272A] px-2 py-0.5 border border-[#141414]/30 dark:border-[#3F3F46]">
               {selectedType === 'all' ? 'ALL FORMATS' : selectedType === 'movie' ? 'MOVIES' : 'SERIES'}
             </span>
+            {minImdbRating > 0 && (
+              <>
+                <span>·</span>
+                <span className="font-bold text-amber-500 bg-[#F4F1EA] dark:bg-[#27272A] px-2 py-0.5 border border-[#141414]/30 dark:border-[#3F3F46]">
+                  IMDb {minImdbRating}+
+                </span>
+              </>
+            )}
             <span>·</span>
-            <span className="font-bold text-[#141414] bg-[#F4F1EA] px-2 py-0.5 border border-[#141414]/30">
+            <span className="font-bold text-[#141414] dark:text-[#F4F4F5] bg-[#F4F1EA] dark:bg-[#27272A] px-2 py-0.5 border border-[#141414]/30 dark:border-[#3F3F46]">
               {selectedGenre.toUpperCase()}
             </span>
           </div>
 
-          <div className="text-[11px] font-mono text-[#78716C] hidden sm:block">
-            HD STREAM PLAYBACK
+          <div className="text-[11px] font-mono text-[#78716C] dark:text-[#A1A1AA] hidden sm:block">
+            SORTED BY {sortBy === 'imdb' ? 'TOP IMDb RATING' : sortBy === 'popular' ? 'POPULARITY' : 'RELEASE YEAR'}
           </div>
         </div>
 
         {filteredItems.length === 0 ? (
-          <div className="bg-[#F4F1EA] border border-dashed border-[#141414]/40 p-8 sm:p-12 text-center my-4">
-            <div className="w-12 h-12 border-2 border-[#141414] flex items-center justify-center mx-auto mb-3 font-mono font-bold text-lg">
+          <div className="bg-[#F4F1EA] dark:bg-[#202023] border border-dashed border-[#141414]/40 dark:border-[#3F3F46] p-8 sm:p-12 text-center my-4">
+            <div className="w-12 h-12 border-2 border-[#141414] dark:border-[#3F3F46] flex items-center justify-center mx-auto mb-3 font-mono font-bold text-lg text-[#141414] dark:text-[#F4F4F5]">
               Ø
             </div>
-            <h3 className="font-condensed text-xl font-bold uppercase tracking-wider text-[#141414] mb-1">
-              NO TITLES MATCH CURRENT COMBINATION
+            <h3 className="font-condensed text-xl font-bold uppercase tracking-wider text-[#141414] dark:text-[#F4F4F5] mb-1">
+              NO TITLES MATCH CURRENT CRITERIA
             </h3>
-            <p className="font-serif-editorial text-sm text-[#57534E] max-w-md mx-auto mb-4">
-              We couldn't locate popular or in-demand titles matching the selected platform, format, and genre simultaneously.
+            <p className="font-serif-editorial text-sm text-[#57534E] dark:text-[#A1A1AA] max-w-md mx-auto mb-4">
+              We couldn't find titles matching the selected platform, format, minimum IMDb score, and genre.
             </p>
             <button
               type="button"
               onClick={handleResetFilters}
-              className="px-5 py-2 bg-[#141414] text-[#FAF9F6] hover:bg-[#00A3FF] hover:text-black text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-[2px_2px_0px_0px_rgba(20,20,20,1)]"
+              className="px-5 py-2 bg-[#141414] text-[#FAF9F6] dark:bg-[#F4F4F5] dark:text-[#141414] hover:bg-[#00A3FF] hover:text-black text-xs font-condensed font-bold uppercase tracking-wider transition-colors cursor-pointer shadow-[2px_2px_0px_0px_rgba(20,20,20,1)]"
             >
-              CLEAR FILTERS & SHOW ALL POPULAR TITLES
+              CLEAR FILTERS & SHOW ALL TOP TITLES
             </button>
           </div>
         ) : (

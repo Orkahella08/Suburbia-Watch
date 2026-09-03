@@ -195,7 +195,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#E8E5DC] text-[#141414] flex flex-col font-sans selection:bg-[#141414] selection:text-[#FAF9F6]">
+    <div className="min-h-screen bg-[#E8E5DC] dark:bg-[#0F0F10] text-[#141414] dark:text-[#F4F4F5] flex flex-col font-sans selection:bg-[#141414] selection:text-[#FAF9F6] dark:selection:bg-[#F4F4F5] dark:selection:text-[#141414] transition-colors duration-200">
       {/* Universal Minimalist Editorial Header (Section 15: No login/accounts) */}
       <Header
         currentTab={currentTab}

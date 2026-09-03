@@ -140,7 +140,7 @@ export const WatchPlayer: React.FC<WatchPlayerProps> = ({
     let isMounted = true;
     setIsLoadingEpisodes(true);
 
-    fetchTvSeasonsAndEpisodes(cleanImdb)
+    fetchTvSeasonsAndEpisodes(cleanImdb, media.title)
       .then((fetchedSeasons) => {
         if (!isMounted) return;
         if (fetchedSeasons && fetchedSeasons.length > 0) {
@@ -167,20 +167,132 @@ export const WatchPlayer: React.FC<WatchPlayerProps> = ({
     return seasons.find((s) => s.seasonNumber === currentSeasonNum) || seasons[0];
   }, [seasons, currentSeasonNum]);
 
-  // Next / Previous episode calculation
+  // Next / Previous episode calculation with seamless cross-season boundary support
   const { prevEpisode, nextEpisode } = useMemo(() => {
-    if (!isTV || !currentSeason || !currentEpisode) {
+    if (!isTV || !currentSeason || !currentEpisode || seasons.length === 0) {
       return { prevEpisode: null, nextEpisode: null };
     }
-    const eps = currentSeason.episodes;
-    const idx = eps.findIndex((e) => e.id === currentEpisode.id);
-    return {
-      prevEpisode: idx > 0 ? eps[idx - 1] : null,
-      nextEpisode: idx >= 0 && idx < eps.length - 1 ? eps[idx + 1] : null,
+    const currentSeasonEps = currentSeason.episodes || [];
+    const currentIdx = currentSeasonEps.findIndex((e) => e.id === currentEpisode.id);
+
+    // Previous episode logic (same season or last episode of previous season)
+    let prev: { episode: Episode; seasonNumber: number } | null = null;
+    if (currentIdx > 0) {
+      prev = { episode: currentSeasonEps[currentIdx - 1], seasonNumber: currentSeasonNum };
+    } else {
+      const prevSeason = seasons.find((s) => s.seasonNumber === currentSeasonNum - 1);
+      if (prevSeason && prevSeason.episodes && prevSeason.episodes.length > 0) {
+        prev = {
+          episode: prevSeason.episodes[prevSeason.episodes.length - 1],
+          seasonNumber: prevSeason.seasonNumber,
+        };
+      }
+    }
+
+    // Next episode logic (same season or first episode of next season)
+    let next: { episode: Episode; seasonNumber: number } | null = null;
+    if (currentIdx >= 0 && currentIdx < currentSeasonEps.length - 1) {
+      next = { episode: currentSeasonEps[currentIdx + 1], seasonNumber: currentSeasonNum };
+    } else {
+      const nextSeason = seasons.find((s) => s.seasonNumber === currentSeasonNum + 1);
+      if (nextSeason && nextSeason.episodes && nextSeason.episodes.length > 0) {
+        next = { episode: nextSeason.episodes[0], seasonNumber: nextSeason.seasonNumber };
+      }
+    }
+
+    return { prevEpisode: prev, nextEpisode: next };
+  }, [isTV, currentSeason, currentEpisode, seasons, currentSeasonNum]);
+
+  // Auto next episode configuration & countdown state
+  const [autoNextEnabled, setAutoNextEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('suburbia_auto_next');
+      return saved !== null ? saved === 'true' : true;
+    } catch {
+      return true;
+    }
+  });
+
+  const [autoNextCountdown, setAutoNextCountdown] = useState<number | null>(null);
+  const countdownIntervalRef = useRef<any>(null);
+
+  const cancelAutoNext = () => {
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    setAutoNextCountdown(null);
+  };
+
+  const handleToggleAutoNext = () => {
+    setAutoNextEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem('suburbia_auto_next', String(next));
+      } catch {}
+      if (!next && autoNextCountdown !== null) {
+        cancelAutoNext();
+      }
+      return next;
+    });
+  };
+
+  const startAutoNextCountdown = (seconds = 8) => {
+    if (!nextEpisode) return;
+    cancelAutoNext();
+    setAutoNextCountdown(seconds);
+
+    countdownIntervalRef.current = setInterval(() => {
+      setAutoNextCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(countdownIntervalRef.current);
+          countdownIntervalRef.current = null;
+          if (nextEpisode) {
+            handleSelectEpisode(nextEpisode.episode, nextEpisode.seasonNumber);
+          }
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Clean up auto next timer on unmount
+  useEffect(() => {
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+      }
     };
-  }, [isTV, currentSeason, currentEpisode]);
+  }, []);
+
+  // Listen for video ended messages from player iframe
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      try {
+        const data = event.data;
+        if (
+          data === 'ended' ||
+          data?.event === 'ended' ||
+          data?.type === 'ended' ||
+          data?.status === 'ended' ||
+          data?.action === 'ended' ||
+          data?.event === 'video_ended' ||
+          data?.data === 'ended'
+        ) {
+          if (isTV && autoNextEnabled && nextEpisode) {
+            startAutoNextCountdown(8);
+          }
+        }
+      } catch {}
+    };
+
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [isTV, autoNextEnabled, nextEpisode]);
 
   const handleSelectEpisode = (ep: Episode, seasonNum: number) => {
+    cancelAutoNext();
     setCurrentSeasonNum(seasonNum);
     setCurrentEpisode(ep);
     setPlayerLoading(true);
@@ -411,6 +523,67 @@ export const WatchPlayer: React.FC<WatchPlayerProps> = ({
               </span>
             </div>
           )}
+
+          {/* AUTO-NEXT EPISODE FLOATING COUNTDOWN HUD */}
+          {autoNextCountdown !== null && nextEpisode && (
+            <div
+              id="auto-next-episode-hud"
+              className="absolute inset-x-4 bottom-4 z-30 sm:right-6 sm:left-auto sm:max-w-md bg-[#0D0D10]/95 backdrop-blur-md border-2 border-[#00A3FF] p-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+            >
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <div className="flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#10B981] animate-ping" />
+                  <span className="font-mono text-xs text-[#00A3FF] font-bold uppercase tracking-wider">
+                    AUTO NEXT IN {autoNextCountdown} SECONDS
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={cancelAutoNext}
+                  className="text-[#A8A29E] hover:text-[#FAF9F6] p-1 cursor-pointer"
+                  title="Cancel auto-next countdown"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <div className="text-sm font-condensed font-bold uppercase text-white truncate">
+                S{nextEpisode.seasonNumber.toString().padStart(2, '0')}·E{nextEpisode.episode.episodeNumber.toString().padStart(2, '0')} — {nextEpisode.episode.title}
+              </div>
+              <p className="font-serif-editorial text-xs text-[#A8A29E] line-clamp-1 mt-0.5">
+                {nextEpisode.episode.synopsis}
+              </p>
+
+              {/* Countdown Progress Bar */}
+              <div className="w-full bg-[#27272A] h-1.5 mt-2.5 overflow-hidden">
+                <div
+                  className="bg-[#00A3FF] h-full transition-all duration-1000 ease-linear"
+                  style={{ width: `${((8 - (autoNextCountdown || 0)) / 8) * 100}%` }}
+                />
+              </div>
+
+              <div className="flex items-center gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    cancelAutoNext();
+                    handleSelectEpisode(nextEpisode.episode, nextEpisode.seasonNumber);
+                  }}
+                  className="flex-1 bg-[#00A3FF] hover:bg-[#38BDF8] text-black font-condensed font-bold py-2 px-3 text-xs uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer shadow-[2px_2px_0px_0px_rgba(0,0,0,1)]"
+                >
+                  <Play className="w-3.5 h-3.5 fill-current" />
+                  <span>PLAY EPISODE NOW</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={cancelAutoNext}
+                  className="bg-[#27272A] hover:bg-[#3F3F46] text-[#FAF9F6] font-mono py-2 px-3 text-xs uppercase cursor-pointer"
+                >
+                  CANCEL
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Playback Status HUD */}
@@ -440,8 +613,8 @@ export const WatchPlayer: React.FC<WatchPlayerProps> = ({
         {/* 2. TV EPISODE SELECTOR & CONTROLS */}
         {isTV && (
           <div id="tv-controls-section" className="mt-4 bg-[#141416] border border-[#27272A] p-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-[#27272A] pb-3 mb-3">
-              <div className="flex items-center gap-3">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-[#27272A] pb-3 mb-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-[10px] font-mono uppercase tracking-widest text-[#71717A]">
                   SEASON:
                 </span>
@@ -473,35 +646,62 @@ export const WatchPlayer: React.FC<WatchPlayerProps> = ({
                 )}
               </div>
 
-              {/* Prev / Next Episode Buttons */}
-              <div className="flex items-center gap-2">
+              {/* Prev, Next & Auto-Next Controls */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Auto Next Toggle */}
+                <button
+                  type="button"
+                  id="auto-next-toggle-btn"
+                  onClick={handleToggleAutoNext}
+                  className={`px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider border flex items-center gap-1.5 transition-colors cursor-pointer ${
+                    autoNextEnabled
+                      ? 'border-emerald-500/60 bg-emerald-950/40 text-emerald-300'
+                      : 'border-[#3F3F46] bg-[#18181B] text-[#71717A]'
+                  }`}
+                  title="Toggle automatic playback of subsequent episodes"
+                >
+                  <span className={`w-2 h-2 rounded-full ${autoNextEnabled ? 'bg-emerald-400 animate-pulse' : 'bg-stone-500'}`} />
+                  <span>AUTO NEXT: {autoNextEnabled ? 'ON' : 'OFF'}</span>
+                </button>
+
+                {nextEpisode && (
+                  <button
+                    type="button"
+                    onClick={() => startAutoNextCountdown(5)}
+                    className="px-2.5 py-1.5 text-xs font-mono uppercase tracking-wider border border-[#00A3FF]/40 bg-[#00A3FF]/10 text-[#38BDF8] hover:bg-[#00A3FF]/20 transition-colors cursor-pointer"
+                    title="Simulate end-of-episode auto next countdown"
+                  >
+                    TRIGGER AUTO NEXT (5S)
+                  </button>
+                )}
+
                 <button
                   type="button"
                   id="prev-episode-btn"
-                  onClick={() => prevEpisode && handleSelectEpisode(prevEpisode, prevEpisode.seasonNumber)}
+                  onClick={() => prevEpisode && handleSelectEpisode(prevEpisode.episode, prevEpisode.seasonNumber)}
                   disabled={!prevEpisode}
                   className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border flex items-center gap-1.5 transition-colors ${
                     prevEpisode
                       ? 'border-[#3F3F46] text-[#FAF9F6] hover:border-[#00A3FF] hover:text-[#00A3FF] cursor-pointer bg-[#18181B]'
                       : 'border-[#27272A] text-[#52525B] cursor-not-allowed bg-transparent'
                   }`}
-                  title={prevEpisode ? `Previous: ${prevEpisode.title}` : 'No previous episode'}
+                  title={prevEpisode ? `Previous: S${prevEpisode.seasonNumber}·E${prevEpisode.episode.episodeNumber}` : 'No previous episode'}
                 >
                   <SkipBack className="w-3.5 h-3.5" />
-                  <span>PREVIOUS EPISODE</span>
+                  <span>PREVIOUS</span>
                 </button>
 
                 <button
                   type="button"
                   id="next-episode-btn"
-                  onClick={() => nextEpisode && handleSelectEpisode(nextEpisode, nextEpisode.seasonNumber)}
+                  onClick={() => nextEpisode && handleSelectEpisode(nextEpisode.episode, nextEpisode.seasonNumber)}
                   disabled={!nextEpisode}
                   className={`px-3 py-1.5 text-xs font-condensed uppercase tracking-wider border flex items-center gap-1.5 transition-colors ${
                     nextEpisode
                       ? 'border-[#00A3FF] bg-[#00A3FF] text-black font-bold hover:bg-[#38BDF8] cursor-pointer'
                       : 'border-[#27272A] text-[#52525B] cursor-not-allowed bg-transparent'
                   }`}
-                  title={nextEpisode ? `Next: ${nextEpisode.title}` : 'No next episode'}
+                  title={nextEpisode ? `Next: S${nextEpisode.seasonNumber}·E${nextEpisode.episode.episodeNumber}` : 'No next episode'}
                 >
                   <span>NEXT EPISODE</span>
                   <SkipForward className="w-3.5 h-3.5" />
@@ -797,6 +997,9 @@ export const WatchPlayer: React.FC<WatchPlayerProps> = ({
                       title={item.title}
                       imdbId={item.imdbId}
                       initialPosterUrl={item.posterUrl}
+                      fallbackUrl={item.backdropUrl}
+                      year={item.releaseYear}
+                      loading="eager"
                       className="w-full h-full object-cover"
                     />
                   </div>

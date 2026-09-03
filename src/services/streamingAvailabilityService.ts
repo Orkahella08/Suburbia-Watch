@@ -116,6 +116,24 @@ export const PROVIDER_METAS: Record<LegitimateProviderName, ProviderMeta> = {
     officialDomain: 'https://play.google.com/store/movies',
     supportsEmbedPreview: true,
   },
+  Crunchyroll: {
+    name: 'Crunchyroll',
+    displayName: 'Crunchyroll',
+    badgeColor: 'bg-[#F47521]',
+    textColor: 'text-[#FFFFFF]',
+    borderColor: 'border-[#EA580C]',
+    officialDomain: 'https://www.crunchyroll.com',
+    supportsEmbedPreview: true,
+  },
+  Bilibili: {
+    name: 'Bilibili',
+    displayName: 'Bili Bili',
+    badgeColor: 'bg-[#00A1D6]',
+    textColor: 'text-[#FFFFFF]',
+    borderColor: 'border-[#0284C7]',
+    officialDomain: 'https://www.bilibili.tv',
+    supportsEmbedPreview: true,
+  },
 };
 
 /**
@@ -150,6 +168,10 @@ export function buildOfficialWatchUrl(
       return `https://www.youtube.com/results?search_query=${encodeURIComponent(`${title} official movie stream`)}`;
     case 'Google TV':
       return `https://play.google.com/store/search?c=movies&q=${encTitle}`;
+    case 'Crunchyroll':
+      return `https://www.crunchyroll.com/search?q=${encTitle}`;
+    case 'Bilibili':
+      return `https://www.bilibili.tv/en/search-result?q=${encTitle}`;
     default:
       return `https://www.imdb.com/title/${cleanImdb}/`;
   }
