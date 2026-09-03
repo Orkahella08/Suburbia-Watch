@@ -165,7 +165,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
 
               {/* Editorial Frame Markings */}
               <div className="absolute top-3 left-3 text-[10px] font-mono uppercase bg-[#141414]/90 text-[#FAF9F6] px-2 py-0.5 border border-white/20">
-                IMDb ID: {current.imdbId}
+                {current.type === 'movie' ? 'FEATURE FILM' : 'TELEVISION SERIES'} · {current.releaseYear}
               </div>
 
               <div className="absolute bottom-3 right-3 text-[10px] font-mono uppercase bg-[#FAF9F6]/95 text-[#141414] px-2 py-0.5 font-bold border border-[#141414]">

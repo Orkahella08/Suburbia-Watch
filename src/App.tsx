@@ -234,25 +234,8 @@ export default function App() {
         {/* HOMEPAGE VIEW (Section 15) */}
         {currentTab === 'home' && (
           <div>
-            {/* HERO: Large 16:9 cinematic landscape artwork (Section 15 & 16) */}
-            <HeroBanner
-              featuredItems={featuredItems}
-              onPlay={handlePlay}
-              onOpenDetails={(film) => setDetailItem(film)}
-              watchlist={watchlist}
-              onToggleWatchlist={handleToggleWatchlist}
-            />
-
-            <div className="max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-12">
-              {/* CONTINUE WATCHING (Section 6) */}
-              <ContinueWatchingShelf
-                progressList={progressList}
-                allMedia={catalogMedia}
-                onResume={handleResumeProgress}
-                onClearProgress={handleClearProgress}
-              />
-
-              {/* EXPLORE STREAMING PLATFORMS (NETFLIX, DISNEY+, HBO MAX, HULU, VIU, AMAZON PRIME, APPLE TV+) */}
+            <div className="max-w-7xl mx-auto px-4 sm:px-8 pt-8 sm:pt-10">
+              {/* 1. EXPLORE STREAMING PLATFORMS (DISTRIBUTION INDEX · CATALOGUE FILTERING) */}
               <ExploreStreamingPlatforms
                 selectedPlatform={homeSelectedPlatform}
                 onSelectPlatform={setHomeSelectedPlatform}
@@ -260,7 +243,7 @@ export default function App() {
 
               {/* DYNAMIC PLATFORM FILTERED REEL */}
               {homeSelectedPlatform && (
-                <section id="section-platform-filtered" className="mb-14 border-2 border-[#141414] bg-[#F4F1EA] p-6 sm:p-8">
+                <section id="section-platform-filtered" className="mb-12 border-2 border-[#141414] bg-[#F4F1EA] p-6 sm:p-8">
                   <div className="flex items-baseline justify-between border-b-2 border-[#141414] pb-3 mb-6">
                     <div>
                       <div className="text-[10px] font-mono uppercase tracking-widest text-[#78716C]">
@@ -302,6 +285,26 @@ export default function App() {
                   )}
                 </section>
               )}
+
+              {/* 2. CONTINUE WATCHING (ACTIVE PROJECTIONS · LOCAL PROGRESS) */}
+              <ContinueWatchingShelf
+                progressList={progressList}
+                allMedia={catalogMedia}
+                onResume={handleResumeProgress}
+                onClearProgress={handleClearProgress}
+              />
+            </div>
+
+            {/* 3. HERO CAROUSEL: Large 16:9 cinematic landscape artwork (Section 15 & 16) */}
+            <HeroBanner
+              featuredItems={featuredItems}
+              onPlay={handlePlay}
+              onOpenDetails={(film) => setDetailItem(film)}
+              watchlist={watchlist}
+              onToggleWatchlist={handleToggleWatchlist}
+            />
+
+            <div className="max-w-7xl mx-auto px-4 sm:px-8 py-8 sm:py-12">
 
               {/* 1. FEATURED FILMS (Section 15) */}
               <section id="section-featured-films" className="mb-14">

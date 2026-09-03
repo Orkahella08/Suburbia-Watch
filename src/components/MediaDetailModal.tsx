@@ -57,7 +57,7 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
             </span>
             <span className="hidden sm:inline-block w-1.5 h-1.5 bg-[#141414]" />
             <span className="hidden sm:inline text-[10px] font-mono uppercase tracking-widest text-[#141414] font-bold">
-              IMDb ID: {item.imdbId}
+              RELEASE: {item.releaseYear}
             </span>
           </div>
           <button
@@ -179,10 +179,10 @@ export const MediaDetailModal: React.FC<MediaDetailModalProps> = ({
 
               <div>
                 <div className="text-[10px] uppercase tracking-widest text-[#78716C]">
-                  IMDb ID
+                  ARCHIVAL REF
                 </div>
-                <div className="text-sm font-bold text-[#141414] uppercase mt-0.5">
-                  {item.imdbId}
+                <div className="text-sm font-bold text-[#141414] uppercase mt-0.5 font-mono">
+                  #{item.id.toUpperCase().slice(0, 10)}
                 </div>
               </div>
             </div>
